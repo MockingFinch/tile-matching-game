@@ -7,6 +7,10 @@ const TILE_SIZE = 64; // Original tile size (we'll use this as default)
 const TILE_PADDING = 4; // Define padding as a constant
 const ASSET_KEYS = ["food_1", "food_2", "food_3", "food_4", "food_5", "food_6"]; // Keys matching the filenames (without extension)
 
+// Add tile sizing constants
+const TILE_SIZE_MULTIPLIER = 1; // Base multiplier for tile size calculation
+const TILE_IMAGE_SCALE = 0.9; // Scale for the image compared to tile size (70-90%)
+
 // Add these new constants for our cute UI
 const COLORS = {
   PASTEL_PINK: 0xffb6c1,
@@ -415,11 +419,11 @@ export class GameScene extends Phaser.Scene {
 
     // Calculate proper tile size - slightly smaller to ensure images fit correctly
     const properTileSize = Math.min(
-      Math.floor(this.tileSize * 1),
+      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
       this.tileSize - TILE_PADDING * 2
     );
 
-    const imageSize = properTileSize * 0.9; // 70% of proper tile size
+    const imageSize = properTileSize * TILE_IMAGE_SCALE;
 
     for (let row = 0; row < GRID_HEIGHT; row++) {
       this.grid[row] = [];
@@ -495,11 +499,11 @@ export class GameScene extends Phaser.Scene {
 
     // Calculate proper tile size
     const properTileSize = Math.min(
-      Math.floor(this.tileSize * 1),
+      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
       this.tileSize - TILE_PADDING * 2
     );
 
-    const imageSize = properTileSize * 0.9; // 70% of proper tile size
+    const imageSize = properTileSize * TILE_IMAGE_SCALE;
 
     for (let row = 0; row < GRID_HEIGHT; row++) {
       this.grid[row] = [];
@@ -838,11 +842,11 @@ export class GameScene extends Phaser.Scene {
 
     // IMPORTANT FIX: Properly size special tiles to be slightly smaller than regular tiles
     const properTileSize = Math.min(
-      Math.floor(this.tileSize * 1),
+      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
       this.tileSize - TILE_PADDING * 2
     );
-    const baseWidth = properTileSize * 0.9; // Special tiles are slightly larger
-    const baseHeight = properTileSize * 0.9;
+    const baseWidth = properTileSize * TILE_IMAGE_SCALE;
+    const baseHeight = properTileSize * TILE_IMAGE_SCALE;
 
     specialTile.setDisplaySize(baseWidth, baseHeight);
     specialTile.setData("baseWidth", baseWidth);
@@ -1250,10 +1254,10 @@ export class GameScene extends Phaser.Scene {
 
     // Calculate proper image size
     const properTileSize = Math.min(
-      Math.floor(this.tileSize * 1),
+      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
       this.tileSize - TILE_PADDING * 2
     );
-    const imageSize = properTileSize * 0.9; // 70% of proper tile size
+    const imageSize = properTileSize * TILE_IMAGE_SCALE;
 
     // Scan entire grid for null spaces and fill them
     for (let col = 0; col < GRID_WIDTH; col++) {
