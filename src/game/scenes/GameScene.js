@@ -81,9 +81,8 @@ export class GameScene extends Phaser.Scene {
     // UI references
     this.scoreText = null;
     this.movesText = null;
-    this.mascot = null;
-    this.mascotText = null;
-    this.speechBubble = null;
+    this.notificationText = null;
+    this.notificationBox = null;
 
     // Sounds
     this.soundEnabled = false; // Default to OFF since files don't exist yet
@@ -215,7 +214,7 @@ export class GameScene extends Phaser.Scene {
     this.createCuteTitle();
     this.createScoreDisplay();
     this.createMovesDisplay();
-    this.createMascot();
+    this.createNotification();
   }
 
   /**
@@ -409,6 +408,43 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * Create notification display
+   */
+  createNotification() {
+    const screenWidth = this.cameras.main.width;
+    const screenHeight = this.cameras.main.height;
+
+    // Create notification box
+    this.notificationBox = this.add.graphics();
+    this.notificationBox.fillStyle(COLORS.SOFT_WHITE, 0.9);
+    this.notificationBox.fillRoundedRect(
+      screenWidth / 2 - 150,
+      screenHeight - 100,
+      300,
+      60,
+      20
+    );
+    this.notificationBox.setDepth(9);
+
+    // Add text to notification
+    this.notificationText = this.add.text(
+      screenWidth / 2,
+      screenHeight - 70,
+      "开始吧!",
+      {
+        font: "18px Arial",
+        fill: "#5c3d46",
+      }
+    );
+    this.notificationText.setOrigin(0.5);
+    this.notificationText.setDepth(10);
+
+    // Hide notification initially
+    this.notificationBox.setAlpha(0);
+    this.notificationText.setAlpha(0);
+  }
+
+  /**
    * Create sound toggle button
    */
   createSoundButton() {
@@ -466,57 +502,6 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * Create mascot character with speech bubble
-   */
-  createMascot() {
-    const screenWidth = this.cameras.main.width;
-    const screenHeight = this.cameras.main.height;
-
-    // Create mascot using one of the food images initially
-    this.mascot = this.add.sprite(150, screenHeight - 100, "food_1");
-
-    // Set a fixed size for the mascot to avoid sizing issues
-    this.mascot.setDisplaySize(80, 80);
-    this.mascot.setDepth(10);
-
-    // Add speech bubble with proper positioning
-    this.speechBubble = this.add.graphics();
-    this.speechBubble.fillStyle(COLORS.SOFT_WHITE, 0.9);
-    this.speechBubble.fillRoundedRect(200, screenHeight - 140, 160, 60, 20);
-    this.speechBubble.fillTriangle(
-      200,
-      screenHeight - 115,
-      180,
-      screenHeight - 100,
-      200,
-      screenHeight - 90
-    );
-    this.speechBubble.setDepth(9);
-
-    // Add text to speech bubble with proper sizing
-    this.mascotText = this.add.text(280, screenHeight - 110, "加油!", {
-      font: "18px Arial",
-      fill: "#5c3d46",
-    });
-    this.mascotText.setOrigin(0.5);
-    this.mascotText.setDepth(10);
-
-    // Add idle animation with smaller range to prevent overlapping
-    this.tweens.add({
-      targets: this.mascot,
-      y: screenHeight - 110,
-      duration: 2000,
-      ease: "Sine.easeInOut",
-      yoyo: true,
-      repeat: -1,
-    });
-
-    // Hide speech bubble initially
-    this.speechBubble.setAlpha(0);
-    this.mascotText.setAlpha(0);
-  }
-
   // =============================================================================
   // GRID MANAGEMENT
   // =============================================================================
@@ -572,7 +557,7 @@ export class GameScene extends Phaser.Scene {
 
     // Show a welcome message after a short delay
     this.time.delayedCall(500, () => {
-      this.showMascotMessage("开始吧!");
+      this.showNotification("开始吧!");
     });
   }
 
@@ -632,9 +617,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Show mascot greeting
+    // Show greeting
     this.time.delayedCall(1000, () => {
-      this.showMascotMessage("开始吧!");
+      this.showNotification("开始吧!");
     });
   }
 
@@ -1266,11 +1251,11 @@ export class GameScene extends Phaser.Scene {
 
     console.log(`Found ${matchedTiles.length} matches! +${matchScore} points`);
 
-    // Show cute mascot message for good matches
+    // Show notification message for good matches
     if (matchedTiles.length >= 5) {
-      this.showMascotMessage("太棒了!");
+      this.showNotification("太棒了!");
     } else if (matchedTiles.length >= 4) {
-      this.showMascotMessage("真厉害!");
+      this.showNotification("真厉害!");
     }
 
     // Special match detection logic
@@ -1719,8 +1704,8 @@ export class GameScene extends Phaser.Scene {
     // Add confetti effect
     this.createConfetti();
 
-    // Update mascot
-    this.showMascotMessage("下次会更好!");
+    // Update notification
+    this.showNotification("下次会更好!");
   }
 
   // =============================================================================
@@ -1827,34 +1812,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Show message from mascot character
+   * Show notification message
    * @param {string} message Message to display
    */
-  showMascotMessage(message) {
+  showNotification(message) {
     // Set the message text
-    this.mascotText.setText(message);
+    this.notificationText.setText(message);
 
-    // Show speech bubble
+    // Show notification box
     this.tweens.add({
-      targets: [this.speechBubble, this.mascotText],
+      targets: [this.notificationBox, this.notificationText],
       alpha: 1,
       duration: 300,
-    });
-
-    // Animate mascot
-    this.tweens.add({
-      targets: this.mascot,
-      scaleX: 1.2,
-      scaleY: 1.2,
-      duration: 200,
-      yoyo: true,
-      repeat: 2,
     });
 
     // Hide message after a delay
     this.time.delayedCall(2000, () => {
       this.tweens.add({
-        targets: [this.speechBubble, this.mascotText],
+        targets: [this.notificationBox, this.notificationText],
         alpha: 0,
         duration: 300,
       });
