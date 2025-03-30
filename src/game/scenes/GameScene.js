@@ -114,10 +114,14 @@ export class GameScene extends Phaser.Scene {
 
     console.log("Grid initialized.");
 
-    // --- Enable Input ---
-    // Add input listener *after* tiles are created
-    this.input.on("gameobjectdown", this.handleTileClick, this);
-
+    // --- MODIFY: Change the input handler setup ---
+    // Remove the old gameobjectdown event listener
+    // this.input.on("gameobjectdown", this.handleTileClick, this);
+    
+    // Instead, add pointer events for drag-and-release behavior
+    this.input.on('gameobjectdown', this.onTilePointerDown, this);
+    this.input.on('pointerup', this.onPointerUp, this);
+    
     // --- NEW: Initialize empty sounds object ---
     this.sounds = {};
     
@@ -575,51 +579,67 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // --- MODIFY: handleTileClick to disable special tile swapping ---
-  handleTileClick(pointer, gameObject) {
+  // --- NEW: Add pointer down handler ---
+  onTilePointerDown(pointer, gameObject) {
     if (!this.canSelect || !this.tileSprites.contains(gameObject)) {
       return;
     }
 
     const clickedTile = gameObject;
-    const clickedRow = clickedTile.getData("gridRow");
-    const clickedCol = clickedTile.getData("gridCol");
     const specialType = clickedTile.getData("specialType");
     
-    // Skip special tiles entirely - they can't be selected anymore
+    // Skip special tiles - they can't be selected
     if (specialType) {
       console.log("Special tiles auto-activate and cannot be manually selected");
       return;
     }
     
-    // Also skip if the currently selected tile is special
-    if (this.selectedTile && this.selectedTile.getData("specialType")) {
-      this.deselectTile();
+    // Select the tile
+    this.deselectTile(); // Clear any previous selection
+    this.selectTile(clickedTile);
+  }
+
+  // --- NEW: Add pointer up handler ---
+  onPointerUp(pointer) {
+    if (!this.selectedTile || !this.canSelect) {
       return;
     }
-
-    // Regular tile handling...
-    if (this.selectedTile) {
+    
+    // Get the tile under the pointer (if any)
+    const targetPosition = pointer.position;
+    let targetTile = null;
+    
+    // Find if we're over a tile
+    this.tileSprites.getChildren().forEach(tile => {
+      if (Phaser.Geom.Rectangle.Contains(
+        tile.getBounds(), 
+        targetPosition.x, 
+        targetPosition.y
+      )) {
+        targetTile = tile;
+      }
+    });
+    
+    if (targetTile && targetTile !== this.selectedTile) {
+      // Check if they're adjacent
       const selectedRow = this.selectedTile.getData("gridRow");
       const selectedCol = this.selectedTile.getData("gridCol");
-
-      if (clickedTile === this.selectedTile) {
-        this.deselectTile();
-        return;
-      }
-
-      const dx = Math.abs(clickedCol - selectedCol);
-      const dy = Math.abs(clickedRow - selectedRow);
-
+      const targetRow = targetTile.getData("gridRow");
+      const targetCol = targetTile.getData("gridCol");
+      
+      const dx = Math.abs(targetCol - selectedCol);
+      const dy = Math.abs(targetRow - selectedRow);
+      
       if (dx + dy === 1) {
-        console.log(`Swapping [${selectedRow},${selectedCol}] with [${clickedRow},${clickedCol}]`);
-        this.swapTiles(this.selectedTile, clickedTile);
+        console.log(`Swapping [${selectedRow},${selectedCol}] with [${targetRow},${targetCol}]`);
+        this.swapTiles(this.selectedTile, targetTile);
       } else {
+        // Not adjacent - deselect the current tile and select the new one
         this.deselectTile();
-        this.selectTile(clickedTile);
       }
     } else {
-      this.selectTile(clickedTile);
+      // Released not over a valid target - just deselect
+      this.deselectTile();
     }
   }
 
