@@ -11,12 +11,18 @@ const PhaserGameNoSSR = dynamic(() => import("@/components/PhaserGame"), {
 
 export default function Home() {
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [isClient, setIsClient] = useState(false);
   
   useEffect(() => {
+    // This code only runs on the client after the component mounts
+    setIsClient(true);
     setViewportHeight(window.innerHeight);
+    setViewportWidth(window.innerWidth);
     
     const handleResize = () => {
       setViewportHeight(window.innerHeight);
+      setViewportWidth(window.innerWidth);
     };
     
     window.addEventListener('resize', handleResize);
@@ -24,20 +30,34 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col items-center" style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div className="flex flex-col items-center" 
+         style={{ 
+           height: '100vh', 
+           width: '100vw', 
+           overflow: 'hidden',
+           background: 'linear-gradient(to bottom right, #ffe6f2, #e6f7ff)',
+           margin: 0,
+           padding: 0
+         }}>
       <Head>
         <title>食物消消乐 - Food Sticker Fiesta</title>
       </Head>
       
-      {/* Game takes full available space with horizontal scrolling if needed */}
-      <div className="overflow-auto w-full h-full" style={{ overscrollBehavior: 'none' }}>
+      {/* Game takes full available space */}
+      <div className="w-full h-full" 
+           style={{ 
+             overscrollBehavior: 'none',
+             overflow: 'hidden'
+           }}>
         <PhaserGameNoSSR />
       </div>
       
-      {/* Info line showing resolution */}
-      <p className="text-xs text-gray-400 absolute bottom-1">
-        2560x{viewportHeight} (2K)
-      </p>
+      {/* Only show resolution info when on client-side */}
+      {isClient && (
+        <p className="text-xs text-pink-400 absolute bottom-1 right-2 z-10">
+          {viewportWidth}x{viewportHeight}
+        </p>
+      )}
     </div>
   );
 }
