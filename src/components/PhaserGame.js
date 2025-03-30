@@ -59,7 +59,8 @@ const PhaserGame = () => {
               height: height,
               // IMPORTANT: Add these to ensure full screen
               autoCenter: Phaser.Scale.CENTER_BOTH,
-              expandParent: true
+              expandParent: true,
+              orientation: Phaser.Scale.PORTRAIT // Force portrait orientation
             },
             textures: {
               crossOrigin: 'anonymous',

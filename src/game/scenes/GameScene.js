@@ -5,8 +5,8 @@ import * as Phaser from "phaser";
 // =============================================================================
 
 // --- Grid Configuration ---
-const GRID_WIDTH = 8; // Number of columns
-const GRID_HEIGHT = 8; // Number of rows
+const GRID_WIDTH = 6; // Changed from 8 to 6 (columns)
+const GRID_HEIGHT = 10; // Changed from 8 to 10 (rows)
 const TILE_SIZE = 64; // Original tile size (we'll use this as default)
 const TILE_PADDING = 4; // Define padding as a constant
 const TILE_SIZE_MULTIPLIER = 1; // Base multiplier for tile size calculation
@@ -179,16 +179,29 @@ export class GameScene extends Phaser.Scene {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
 
-    // Calculate tile size based on screen height
-    const maxGridHeight = screenHeight * 0.85;
-    this.tileSize = Math.floor(maxGridHeight / GRID_HEIGHT);
-    this.tileSize = Math.min(this.tileSize, 83); // Maximum tile size
-
+    // For mobile, calculate tile size based on screen width since we have fewer columns
+    const maxGridWidth = screenWidth * 0.95; // Use 95% of screen width
+    const maxGridHeight = screenHeight * 0.7; // Use 70% of screen height
+    
+    // Calculate tile size based on width or height, whichever is more constraining
+    const widthBasedTileSize = Math.floor(maxGridWidth / GRID_WIDTH);
+    const heightBasedTileSize = Math.floor(maxGridHeight / GRID_HEIGHT);
+    
+    // Use the smaller of the two calculations to ensure grid fits on screen
+    this.tileSize = Math.min(widthBasedTileSize, heightBasedTileSize);
+    
+    // Make sure tiles aren't too big
+    this.tileSize = Math.min(this.tileSize, 70); // Reduced max size for mobile
+    
     // Calculate grid offsets to center the grid
     const gridPixelWidth = GRID_WIDTH * this.tileSize;
     const gridPixelHeight = GRID_HEIGHT * this.tileSize;
     this.gridOffsetX = Math.floor((screenWidth - gridPixelWidth) / 2);
-    this.gridOffsetY = Math.floor((screenHeight - gridPixelHeight) / 2);
+    
+    // Position grid higher on the screen to account for controls at bottom
+    this.gridOffsetY = Math.floor(screenHeight * 0.15); // Start grid at 15% from top
+    
+    console.log(`Grid dimensions: ${GRID_WIDTH}x${GRID_HEIGHT}, Tile size: ${this.tileSize}`);
   }
 
   /**
@@ -196,8 +209,36 @@ export class GameScene extends Phaser.Scene {
    * @private
    */
   _setupInputHandlers() {
+    // Remove traditional input methods
     this.input.on("gameobjectdown", this.onTilePointerDown, this);
     this.input.on("pointerup", this.onPointerUp, this);
+    
+    // Add touch-specific handlers with larger hitboxes
+    this.input.on('pointerdown', (pointer) => {
+      if (!pointer.isDown || !this.canSelect) return;
+      
+      // Increase touch area to make selection easier on mobile
+      const touchArea = new Phaser.Geom.Circle(pointer.x, pointer.y, 20);
+      let touched = false;
+      
+      this.tileSprites.getChildren().forEach((tile) => {
+        const tileBounds = tile.getBounds();
+        const tileCenter = new Phaser.Geom.Point(
+          tileBounds.centerX,
+          tileBounds.centerY
+        );
+        
+        if (touchArea.contains(tileCenter.x, tileCenter.y)) {
+          this.onTilePointerDown(pointer, tile);
+          touched = true;
+        }
+      });
+      
+      // Clear selection if touched empty space
+      if (!touched && this.selectedTile) {
+        this.deselectTile();
+      }
+    });
   }
 
   /**
@@ -322,45 +363,51 @@ export class GameScene extends Phaser.Scene {
   createCuteTitle() {
     const screenWidth = this.cameras.main.width;
 
+    // Position title above the grid
+    const titleY = this.gridOffsetY - 50;
+
     // Create title background
     const titleBg = this.add.graphics();
     titleBg.fillStyle(COLORS.PASTEL_PINK, 0.7);
     titleBg.fillRoundedRect(
-      screenWidth / 2 - 150,
-      this.gridOffsetY - 90,
-      300,
-      60,
-      20
+      screenWidth / 2 - 120,
+      titleY - 20,
+      240,
+      40,
+      15
     );
     titleBg.setDepth(5);
 
     // Add title text
     const title = this.add.text(
       screenWidth / 2,
-      this.gridOffsetY - 60,
+      titleY,
       "食物消消乐",
-      FONTS.TITLE
+      {
+        font: "bold 24px Arial", // Slightly smaller for mobile
+        fill: "#ff6b81"
+      }
     );
     title.setOrigin(0.5);
     title.setDepth(6);
 
-    // Add decorative elements
+    // Add decorative elements (smaller for mobile)
     const leftStar = this.add.star(
-      screenWidth / 2 - 170,
-      this.gridOffsetY - 60,
+      screenWidth / 2 - 140,
+      titleY,
       5,
-      10,
-      20,
+      8,
+      16,
       COLORS.PASTEL_YELLOW
     );
     leftStar.setDepth(6);
 
     const rightStar = this.add.star(
-      screenWidth / 2 + 170,
-      this.gridOffsetY - 60,
+      screenWidth / 2 + 140,
+      titleY,
       5,
-      10,
-      20,
+      8,
+      16,
       COLORS.PASTEL_YELLOW
     );
     rightStar.setDepth(6);
@@ -378,20 +425,23 @@ export class GameScene extends Phaser.Scene {
    * Create score display
    */
   createScoreDisplay() {
-    const scoreX = 100;
-    const scoreY = 50;
+    const scoreX = 70;
+    const scoreY = 30; // Higher position
 
     // Create score badge background
     const scoreBg = this.add.graphics();
     scoreBg.fillStyle(COLORS.PASTEL_GREEN, 0.9);
-    scoreBg.fillRoundedRect(scoreX - 80, scoreY - 25, 160, 50, 25);
+    scoreBg.fillRoundedRect(scoreX - 60, scoreY - 15, 120, 35, 15);
     scoreBg.setDepth(5);
 
     // Add score text with shadow
-    this.scoreText = this.add.text(scoreX, scoreY, "分数: 0", FONTS.SCORE);
+    this.scoreText = this.add.text(scoreX, scoreY, "分数: 0", {
+      font: "bold 18px Arial", // Smaller for mobile
+      fill: "#5c3d46"
+    });
     this.scoreText.setOrigin(0.5);
     this.scoreText.setDepth(6);
-    this.scoreText.setShadow(2, 2, "rgba(0,0,0,0.2)", 2);
+    this.scoreText.setShadow(1, 1, "rgba(0,0,0,0.2)", 1);
   }
 
   /**
@@ -399,20 +449,23 @@ export class GameScene extends Phaser.Scene {
    */
   createMovesDisplay() {
     const screenWidth = this.cameras.main.width;
-    const movesX = screenWidth - 100;
-    const movesY = 50;
+    const movesX = screenWidth - 70;
+    const movesY = 30; // Higher position
 
     // Create moves badge background
     const movesBg = this.add.graphics();
     movesBg.fillStyle(COLORS.PASTEL_BLUE, 0.9);
-    movesBg.fillRoundedRect(movesX - 100, movesY - 25, 200, 50, 25);
+    movesBg.fillRoundedRect(movesX - 80, movesY - 15, 160, 35, 15);
     movesBg.setDepth(5);
 
     // Add moves text with shadow
-    this.movesText = this.add.text(movesX, movesY, "剩余步数: 20", FONTS.MOVES);
+    this.movesText = this.add.text(movesX, movesY, "剩余步数: 20", {
+      font: "bold 18px Arial", // Smaller for mobile
+      fill: "#5c3d46"
+    });
     this.movesText.setOrigin(0.5);
     this.movesText.setDepth(6);
-    this.movesText.setShadow(2, 2, "rgba(0,0,0,0.2)", 2);
+    this.movesText.setShadow(1, 1, "rgba(0,0,0,0.2)", 1);
   }
 
   /**
@@ -422,25 +475,28 @@ export class GameScene extends Phaser.Scene {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
 
+    // Position notification below the grid
+    const notificationY = this.gridOffsetY + (GRID_HEIGHT * this.tileSize) + 30;
+
     // Create notification box
     this.notificationBox = this.add.graphics();
     this.notificationBox.fillStyle(COLORS.SOFT_WHITE, 0.9);
     this.notificationBox.fillRoundedRect(
-      screenWidth / 2 - 150,
-      screenHeight - 100,
-      300,
-      60,
-      20
+      screenWidth / 2 - 120,
+      notificationY,
+      240,
+      40,
+      15
     );
     this.notificationBox.setDepth(9);
 
     // Add text to notification
     this.notificationText = this.add.text(
       screenWidth / 2,
-      screenHeight - 70,
+      notificationY + 20,
       "开始吧!",
       {
-        font: "18px Arial",
+        font: "16px Arial", // Smaller for mobile
         fill: "#5c3d46",
       }
     );
@@ -459,22 +515,25 @@ export class GameScene extends Phaser.Scene {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
 
+    // Position sound button below the grid
+    const buttonY = this.gridOffsetY + (GRID_HEIGHT * this.tileSize) + 50;
+
     // Create button background
     const buttonBg = this.add.circle(
-      screenWidth - 50,
-      screenHeight - 50,
-      30,
+      screenWidth - 40,
+      buttonY,
+      25,
       COLORS.PASTEL_YELLOW
     );
     buttonBg.setDepth(5);
 
     // Add sound icon
     const soundButton = this.add.text(
-      screenWidth - 50,
-      screenHeight - 50,
+      screenWidth - 40,
+      buttonY,
       this.soundEnabled ? "🔊" : "🔇",
       {
-        font: "24px Arial",
+        font: "20px Arial",
         fill: "#5c3d46",
       }
     );
@@ -1595,36 +1654,42 @@ export class GameScene extends Phaser.Scene {
     overlay.fillRect(0, 0, screenWidth, screenHeight);
     overlay.setDepth(20);
 
-    // Create decorative frame for game over
-    const frameWidth = 400;
-    const frameHeight = 500;
+    // Create smaller decorative frame for game over (optimized for mobile)
+    const frameWidth = Math.min(350, screenWidth * 0.8);
+    const frameHeight = 420;
     const frameX = screenWidth / 2 - frameWidth / 2;
     const frameY = screenHeight / 2 - frameHeight / 2;
 
     const frame = this.add.graphics();
     frame.fillStyle(COLORS.SOFT_WHITE, 0.9);
     frame.fillRoundedRect(frameX, frameY, frameWidth, frameHeight, 20);
-    frame.lineStyle(10, COLORS.PASTEL_YELLOW, 1);
+    frame.lineStyle(8, COLORS.PASTEL_YELLOW, 1); // Slightly thinner border
     frame.strokeRoundedRect(frameX, frameY, frameWidth, frameHeight, 20);
     frame.setDepth(21);
 
     // Create game over text
     const gameOverText = this.add.text(
       screenWidth / 2,
-      frameY + 80,
+      frameY + 60,
       "游戏结束!",
-      FONTS.GAME_OVER
+      {
+        font: "bold 36px Arial", // Smaller for mobile
+        fill: "#ff6b81"
+      }
     );
     gameOverText.setOrigin(0.5);
     gameOverText.setDepth(22);
-    gameOverText.setShadow(3, 3, "rgba(0,0,0,0.2)", 3);
+    gameOverText.setShadow(2, 2, "rgba(0,0,0,0.2)", 2);
 
     // Display final score
     const scoreText = this.add.text(
       screenWidth / 2,
-      frameY + 160,
+      frameY + 130,
       `最终分数: ${this.score}`,
-      { font: "32px Arial", fill: "#5c3d46" }
+      { 
+        font: "28px Arial", // Smaller for mobile
+        fill: "#5c3d46" 
+      }
     );
     scoreText.setOrigin(0.5);
     scoreText.setDepth(22);
