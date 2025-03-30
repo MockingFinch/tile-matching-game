@@ -3,7 +3,7 @@ import * as Phaser from "phaser";
 // --- Constants ---
 const GRID_WIDTH = 8; // Number of columns
 const GRID_HEIGHT = 8; // Number of rows
-const TILE_SIZE = 64; // Pixel size of each tile (adjust based on your assets)
+const TILE_SIZE = 64; // Original tile size (we'll use this as default)
 const TILE_PADDING = 4; // Define padding as a constant
 const ASSET_KEYS = [
   "food_1",
@@ -26,6 +26,7 @@ export class GameScene extends Phaser.Scene {
     this.grid = []; // 2D array to hold tile data
     this.tileSprites = null; // Phaser group for tile sprites
     this.tileBackgrounds = null; // Phaser graphics object for tile backgrounds
+    this.tileSize = TILE_SIZE; // Initialize with default but can be changed
 
     // --- NEW: Selection State ---
     this.selectedTile = null;
@@ -66,13 +67,18 @@ export class GameScene extends Phaser.Scene {
   create() {
     console.log("Creating scene...");
 
-    // --- Calculate Grid Offset & Dimensions ---
+    // --- Calculate Grid Offset & Dimensions based on new resolution ---
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
-    const gridPixelWidth = GRID_WIDTH * TILE_SIZE;
-    const gridPixelHeight = GRID_HEIGHT * TILE_SIZE;
+    
+    // Adjust tile size based on screen height to make sure the grid fits nicely
+    const maxGridHeight = screenHeight * 0.75; // Use 75% of screen height for the grid
+    this.tileSize = Math.floor(maxGridHeight / GRID_HEIGHT); // Dynamically resize tiles
+    
+    const gridPixelWidth = GRID_WIDTH * this.tileSize;
+    const gridPixelHeight = GRID_HEIGHT * this.tileSize;
     this.gridOffsetX = Math.floor((screenWidth - gridPixelWidth) / 2);
-    this.gridOffsetY = Math.floor((screenHeight - gridPixelHeight) / 2) + 50;
+    this.gridOffsetY = Math.floor((screenHeight - gridPixelHeight) / 2);
 
     // --- Optional: Set overall canvas background (e.g., light grey) ---
     // this.cameras.main.setBackgroundColor('#f0f0f0'); // Set in config or here
@@ -166,15 +172,15 @@ export class GameScene extends Phaser.Scene {
       this.grid[row] = [];
       for (let col = 0; col < GRID_WIDTH; col++) {
         const tileKey = getRandomTileKey();
-        // Calculate center position for the cell
-        const worldX = Math.floor(this.gridOffsetX + col * TILE_SIZE + TILE_SIZE / 2);
-        const worldY = Math.floor(this.gridOffsetY + row * TILE_SIZE + TILE_SIZE / 2);
+        // Calculate center position for the cell using this.tileSize
+        const worldX = Math.floor(this.gridOffsetX + col * this.tileSize + this.tileSize / 2);
+        const worldY = Math.floor(this.gridOffsetY + row * this.tileSize + this.tileSize / 2);
 
         // 1. Draw the white background square using the Graphics object
-        const bgX = Math.floor(this.gridOffsetX + col * TILE_SIZE);
-        const bgY = Math.floor(this.gridOffsetY + row * TILE_SIZE);
-        this.tileBackgrounds.fillRect(bgX, bgY, TILE_SIZE, TILE_SIZE);
-        this.tileBackgrounds.strokeRect(bgX, bgY, TILE_SIZE, TILE_SIZE); // Draw border
+        const bgX = Math.floor(this.gridOffsetX + col * this.tileSize);
+        const bgY = Math.floor(this.gridOffsetY + row * this.tileSize);
+        this.tileBackgrounds.fillRect(bgX, bgY, this.tileSize, this.tileSize);
+        this.tileBackgrounds.strokeRect(bgX, bgY, this.tileSize, this.tileSize); // Draw border
 
         // 2. Create the food sticker sprite ON TOP of the background
         const tileSprite = this.tileSprites.create(worldX, worldY, tileKey);
@@ -184,8 +190,8 @@ export class GameScene extends Phaser.Scene {
         tileSprite.setData("tileKey", tileKey);
 
         // Set base display size and store it
-        const baseWidth = TILE_SIZE - TILE_PADDING * 2;
-        const baseHeight = TILE_SIZE - TILE_PADDING * 2;
+        const baseWidth = this.tileSize - TILE_PADDING * 2;
+        const baseHeight = this.tileSize - TILE_PADDING * 2;
         tileSprite.setDisplaySize(baseWidth, baseHeight);
         
         // Store the base size as data on the sprite for reference
@@ -443,8 +449,8 @@ export class GameScene extends Phaser.Scene {
     }
     
     // Calculate position
-    const worldX = Math.floor(this.gridOffsetX + col * TILE_SIZE + TILE_SIZE / 2);
-    const worldY = Math.floor(this.gridOffsetY + row * TILE_SIZE + TILE_SIZE / 2);
+    const worldX = Math.floor(this.gridOffsetX + col * this.tileSize + this.tileSize / 2);
+    const worldY = Math.floor(this.gridOffsetY + row * this.tileSize + this.tileSize / 2);
     
     // Create the new special tile
     const specialTile = this.add.sprite(worldX, worldY, type);
@@ -455,8 +461,8 @@ export class GameScene extends Phaser.Scene {
     specialTile.setData("specialType", type);
     
     // Set display size
-    const baseWidth = TILE_SIZE - TILE_PADDING * 2;
-    const baseHeight = TILE_SIZE - TILE_PADDING * 2;
+    const baseWidth = this.tileSize - TILE_PADDING * 2;
+    const baseHeight = this.tileSize - TILE_PADDING * 2;
     specialTile.setDisplaySize(baseWidth, baseHeight);
     specialTile.setData("baseWidth", baseWidth);
     specialTile.setData("baseHeight", baseHeight);
@@ -794,7 +800,7 @@ export class GameScene extends Phaser.Scene {
               tileToMove.setData("gridRow", row);
               
               // Calculate new position
-              const newY = this.gridOffsetY + row * TILE_SIZE + TILE_SIZE / 2;
+              const newY = this.gridOffsetY + row * this.tileSize + this.tileSize / 2;
               
               // Animate the tile moving down
               pendingTiles++;
@@ -847,9 +853,9 @@ export class GameScene extends Phaser.Scene {
           const tileKey = getRandomTileKey();
           
           // Calculate position (start above the grid)
-          const worldX = Math.floor(this.gridOffsetX + col * TILE_SIZE + TILE_SIZE / 2);
-          const startY = Math.floor(this.gridOffsetY - TILE_SIZE); // Start one tile height above grid
-          const finalY = Math.floor(this.gridOffsetY + row * TILE_SIZE + TILE_SIZE / 2);
+          const worldX = Math.floor(this.gridOffsetX + col * this.tileSize + this.tileSize / 2);
+          const startY = Math.floor(this.gridOffsetY - this.tileSize); // Start one tile height above grid
+          const finalY = Math.floor(this.gridOffsetY + row * this.tileSize + this.tileSize / 2);
           
           // Create the sprite
           const tileSprite = this.add.sprite(worldX, startY, tileKey);
@@ -859,8 +865,8 @@ export class GameScene extends Phaser.Scene {
           tileSprite.setData("tileKey", tileKey);
           
           // Set display size
-          const baseWidth = TILE_SIZE - TILE_PADDING * 2;
-          const baseHeight = TILE_SIZE - TILE_PADDING * 2;
+          const baseWidth = this.tileSize - TILE_PADDING * 2;
+          const baseHeight = this.tileSize - TILE_PADDING * 2;
           tileSprite.setDisplaySize(baseWidth, baseHeight);
           tileSprite.setData("baseWidth", baseWidth);
           tileSprite.setData("baseHeight", baseHeight);
