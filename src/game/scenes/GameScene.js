@@ -1,17 +1,27 @@
 import * as Phaser from "phaser";
 
-// --- Constants ---
+// =============================================================================
+// CONFIGURATION & CONSTANTS
+// =============================================================================
+
+// --- Grid Configuration ---
 const GRID_WIDTH = 8; // Number of columns
 const GRID_HEIGHT = 8; // Number of rows
 const TILE_SIZE = 64; // Original tile size (we'll use this as default)
 const TILE_PADDING = 4; // Define padding as a constant
-const ASSET_KEYS = ["food_1", "food_2", "food_3", "food_4", "food_5", "food_6"]; // Keys matching the filenames (without extension)
-
-// Add tile sizing constants
 const TILE_SIZE_MULTIPLIER = 1; // Base multiplier for tile size calculation
 const TILE_IMAGE_SCALE = 0.9; // Scale for the image compared to tile size (70-90%)
 
-// Add these new constants for our cute UI
+// --- Game Assets ---
+const ASSET_KEYS = ["food_1", "food_2", "food_3", "food_4", "food_5", "food_6"]; // Keys matching the filenames
+const SPECIAL_TYPES = {
+  HORIZONTAL_LINE: "horizontal_line",
+  VERTICAL_LINE: "vertical_line",
+  BOMB: "bomb",
+  RAINBOW: "rainbow",
+};
+
+// --- UI Theme ---
 const COLORS = {
   PASTEL_PINK: 0xffb6c1,
   PASTEL_BLUE: 0xadd8e6,
@@ -30,34 +40,64 @@ const FONTS = {
   BUTTON: { font: "bold 26px Arial", fill: "#ffffff" },
 };
 
-// --- Helper Function --- (Can be moved to a utils file later)
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Returns a random tile key from the available asset keys
+ */
 function getRandomTileKey() {
   const randomIndex = Phaser.Math.Between(0, ASSET_KEYS.length - 1);
   return ASSET_KEYS[randomIndex];
 }
 
+// =============================================================================
+// GAME SCENE CLASS
+// =============================================================================
+
 export class GameScene extends Phaser.Scene {
   constructor() {
     super("GameScene");
+
+    // Grid and tile management
     this.grid = []; // 2D array to hold tile data
     this.tileSprites = null; // Phaser group for tile sprites
     this.tileBackgrounds = null; // Phaser graphics object for tile backgrounds
     this.tileSize = TILE_SIZE; // Initialize with default but can be changed
+    this.gridOffsetX = 0; // X offset of the grid (calculated in create)
+    this.gridOffsetY = 0; // Y offset of the grid (calculated in create)
 
-    // --- NEW: Selection State ---
+    // Selection state
     this.selectedTile = null;
     this.canSelect = true; // Flag to prevent input during animations/matching
 
-    // New tracking variables
+    // Game state
     this.score = 0;
-    this.moves = 20; // Starting with 20 moves
+    this.moves = 20; // Starting moves
     this.isProcessingMatches = false;
+    this.lastMatchPatterns = []; // Store match patterns for special tile creation
 
-    // --- MODIFY: Set sound disabled by default ---
+    // UI references
+    this.scoreText = null;
+    this.movesText = null;
+    this.mascot = null;
+    this.mascotText = null;
+    this.speechBubble = null;
+
+    // Sounds
     this.soundEnabled = false; // Default to OFF since files don't exist yet
     this.soundsLoaded = false; // Track if sounds were loaded
+    this.sounds = {};
   }
 
+  // =============================================================================
+  // LIFECYCLE METHODS
+  // =============================================================================
+
+  /**
+   * Preload all assets needed for the game
+   */
   preload() {
     console.log("Preloading assets...");
 
@@ -73,62 +113,114 @@ export class GameScene extends Phaser.Scene {
       console.log(`Loading asset: ${key}`);
     });
 
-    // Load other assets as before
-    this.load.image("horizontal_line", `/assets/food_1.webp`);
-    this.load.image("vertical_line", `/assets/food_2.webp`);
-    this.load.image("bomb", `/assets/food_3.webp`);
-    this.load.image("rainbow", `/assets/food_4.webp`);
+    // Load special tile assets
+    this.load.image(SPECIAL_TYPES.HORIZONTAL_LINE, `/assets/food_1.webp`);
+    this.load.image(SPECIAL_TYPES.VERTICAL_LINE, `/assets/food_2.webp`);
+    this.load.image(SPECIAL_TYPES.BOMB, `/assets/food_3.webp`);
+    this.load.image(SPECIAL_TYPES.RAINBOW, `/assets/food_4.webp`);
   }
 
+  /**
+   * Initialize the game scene and UI
+   */
   create() {
     console.log("Creating scene...");
 
-    // --- Calculate dimensions first ---
-    const screenWidth = this.cameras.main.width;
-    const screenHeight = this.cameras.main.height;
+    // Calculate dimensions and sizing
+    this._calculateGameDimensions();
 
-    // Fix the tile size calculation
-    const maxGridHeight = screenHeight * 0.85;
-    this.tileSize = Math.floor(maxGridHeight / GRID_HEIGHT);
-    this.tileSize = Math.min(this.tileSize, 83); // Maximum tile size
+    // Initialize UI elements
+    this._createBackground();
+    this._createUI();
 
-    const gridPixelWidth = GRID_WIDTH * this.tileSize;
-    const gridPixelHeight = GRID_HEIGHT * this.tileSize;
-    this.gridOffsetX = Math.floor((screenWidth - gridPixelWidth) / 2);
-    this.gridOffsetY = Math.floor((screenHeight - gridPixelHeight) / 2);
-
-    // Create background and UI elements
-    this.createCuteBackground();
-    this.createGridFrame();
+    // Initialize grid and tiles
     this.tileBackgrounds = this.add.graphics();
     this.tileBackgrounds.setDepth(1);
-    this.createCuteTitle();
-    this.createScoreDisplay();
-    this.createMovesDisplay();
-
-    // --- CRITICAL FIX: Always initialize the grid images with correct sizing ---
-    // Setup the tile sprites group before initializing
     this.tileSprites = this.add.group();
 
-    // This tile will never be seen but ensures textures are loaded and sized correctly
+    // Create a hidden tile to ensure textures are loaded correctly
     const hiddenTile = this.add.sprite(-100, -100, ASSET_KEYS[0]);
     hiddenTile.setDisplaySize(this.tileSize * 0.7, this.tileSize * 0.7);
     hiddenTile.visible = false;
 
-    // Initialize grid without any grow animations that could cause scaling issues
+    // Initialize the actual game grid
     this.initializeGridWithoutAnimations();
 
     // Setup input handlers
-    this.input.on("gameobjectdown", this.onTilePointerDown, this);
-    this.input.on("pointerup", this.onPointerUp, this);
+    this._setupInputHandlers();
 
     // Initialize sounds
+    this._setupSounds();
+  }
+
+  /**
+   * Update function called each frame (not currently used)
+   */
+  update(time, delta) {
+    // Game loop logic (currently empty)
+  }
+
+  // =============================================================================
+  // INITIALIZATION HELPERS
+  // =============================================================================
+
+  /**
+   * Calculate game dimensions and layout
+   * @private
+   */
+  _calculateGameDimensions() {
+    const screenWidth = this.cameras.main.width;
+    const screenHeight = this.cameras.main.height;
+
+    // Calculate tile size based on screen height
+    const maxGridHeight = screenHeight * 0.85;
+    this.tileSize = Math.floor(maxGridHeight / GRID_HEIGHT);
+    this.tileSize = Math.min(this.tileSize, 83); // Maximum tile size
+
+    // Calculate grid offsets to center the grid
+    const gridPixelWidth = GRID_WIDTH * this.tileSize;
+    const gridPixelHeight = GRID_HEIGHT * this.tileSize;
+    this.gridOffsetX = Math.floor((screenWidth - gridPixelWidth) / 2);
+    this.gridOffsetY = Math.floor((screenHeight - gridPixelHeight) / 2);
+  }
+
+  /**
+   * Setup input handlers for the game
+   * @private
+   */
+  _setupInputHandlers() {
+    this.input.on("gameobjectdown", this.onTilePointerDown, this);
+    this.input.on("pointerup", this.onPointerUp, this);
+  }
+
+  /**
+   * Setup sound system
+   * @private
+   */
+  _setupSounds() {
     this.sounds = {};
     this.createSoundButton();
+  }
+
+  // =============================================================================
+  // UI CREATION METHODS
+  // =============================================================================
+
+  /**
+   * Create all UI elements for the game
+   * @private
+   */
+  _createUI() {
+    this.createGridFrame();
+    this.createCuteTitle();
+    this.createScoreDisplay();
+    this.createMovesDisplay();
     this.createMascot();
   }
 
-  // NEW: Create a cute pastel background
+  /**
+   * Create a gradient background with decorative elements
+   */
   createCuteBackground() {
     // Create a gradient background
     const width = this.cameras.main.width;
@@ -177,7 +269,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // NEW: Create a decorative frame around the grid
+  /**
+   * Create background for the game
+   * @private
+   */
+  _createBackground() {
+    this.createCuteBackground();
+  }
+
+  /**
+   * Create a decorative frame around the grid
+   */
   createGridFrame() {
     const gridWidth = GRID_WIDTH * this.tileSize;
     const gridHeight = GRID_HEIGHT * this.tileSize;
@@ -207,7 +309,9 @@ export class GameScene extends Phaser.Scene {
     frame.setDepth(0.5);
   }
 
-  // NEW: Create a cute title with decorations
+  /**
+   * Create a cute title with decorations
+   */
   createCuteTitle() {
     const screenWidth = this.cameras.main.width;
 
@@ -263,7 +367,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // NEW: Create cute score display
+  /**
+   * Create score display
+   */
   createScoreDisplay() {
     const scoreX = 100;
     const scoreY = 50;
@@ -281,7 +387,9 @@ export class GameScene extends Phaser.Scene {
     this.scoreText.setShadow(2, 2, "rgba(0,0,0,0.2)", 2);
   }
 
-  // NEW: Create cute moves display
+  /**
+   * Create moves display
+   */
   createMovesDisplay() {
     const screenWidth = this.cameras.main.width;
     const movesX = screenWidth - 100;
@@ -300,7 +408,9 @@ export class GameScene extends Phaser.Scene {
     this.movesText.setShadow(2, 2, "rgba(0,0,0,0.2)", 2);
   }
 
-  // NEW: Create sound button with cute styling
+  /**
+   * Create sound toggle button
+   */
   createSoundButton() {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
@@ -356,7 +466,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // NEW: Create mascot character
+  /**
+   * Create mascot character with speech bubble
+   */
   createMascot() {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
@@ -364,14 +476,14 @@ export class GameScene extends Phaser.Scene {
     // Create mascot using one of the food images initially
     this.mascot = this.add.sprite(150, screenHeight - 100, "food_1");
 
-    // IMPORTANT FIX: Set a fixed size for the mascot to avoid sizing issues
-    this.mascot.setDisplaySize(80, 80); // Smaller, fixed size
+    // Set a fixed size for the mascot to avoid sizing issues
+    this.mascot.setDisplaySize(80, 80);
     this.mascot.setDepth(10);
 
     // Add speech bubble with proper positioning
     this.speechBubble = this.add.graphics();
     this.speechBubble.fillStyle(COLORS.SOFT_WHITE, 0.9);
-    this.speechBubble.fillRoundedRect(200, screenHeight - 140, 160, 60, 20); // Smaller bubble
+    this.speechBubble.fillRoundedRect(200, screenHeight - 140, 160, 60, 20);
     this.speechBubble.fillTriangle(
       200,
       screenHeight - 115,
@@ -383,19 +495,17 @@ export class GameScene extends Phaser.Scene {
     this.speechBubble.setDepth(9);
 
     // Add text to speech bubble with proper sizing
-    this.mascotText = this.add.text(
-      280, // Centered in the smaller bubble
-      screenHeight - 110,
-      "加油!",
-      { font: "18px Arial", fill: "#5c3d46" } // Slightly smaller font
-    );
+    this.mascotText = this.add.text(280, screenHeight - 110, "加油!", {
+      font: "18px Arial",
+      fill: "#5c3d46",
+    });
     this.mascotText.setOrigin(0.5);
     this.mascotText.setDepth(10);
 
     // Add idle animation with smaller range to prevent overlapping
     this.tweens.add({
       targets: this.mascot,
-      y: screenHeight - 110, // Smaller movement range
+      y: screenHeight - 110,
       duration: 2000,
       ease: "Sine.easeInOut",
       yoyo: true,
@@ -407,7 +517,13 @@ export class GameScene extends Phaser.Scene {
     this.mascotText.setAlpha(0);
   }
 
-  // NEW: Create a separate method that initializes the grid without any animations
+  // =============================================================================
+  // GRID MANAGEMENT
+  // =============================================================================
+
+  /**
+   * Initialize the grid with all tiles at the correct size (no animations)
+   */
   initializeGridWithoutAnimations() {
     console.log("Initializing grid with correct sizing...");
     this.tileBackgrounds.clear();
@@ -425,69 +541,44 @@ export class GameScene extends Phaser.Scene {
 
     const imageSize = properTileSize * TILE_IMAGE_SCALE;
 
+    // Create tiles for each position in the grid
     for (let row = 0; row < GRID_HEIGHT; row++) {
       this.grid[row] = [];
       for (let col = 0; col < GRID_WIDTH; col++) {
+        // Create tile background
+        this._createTileBackground(row, col);
+
+        // Create tile sprite
         const tileKey = getRandomTileKey();
-        const worldX = Math.floor(
-          this.gridOffsetX + col * this.tileSize + this.tileSize / 2
+        const worldX = this._getWorldX(col);
+        const worldY = this._getWorldY(row);
+
+        // Create sprite with exact size immediately
+        const tileSprite = this._createTileSprite(
+          tileKey,
+          worldX,
+          worldY,
+          imageSize,
+          row,
+          col
         );
-        const worldY = Math.floor(
-          this.gridOffsetY + row * this.tileSize + this.tileSize / 2
-        );
-
-        // Draw tile background
-        const bgX = Math.floor(this.gridOffsetX + col * this.tileSize);
-        const bgY = Math.floor(this.gridOffsetY + row * this.tileSize);
-
-        this.tileBackgrounds.fillRoundedRect(
-          bgX + 4,
-          bgY + 4,
-          this.tileSize - 8,
-          this.tileSize - 8,
-          8
-        );
-        this.tileBackgrounds.strokeRoundedRect(
-          bgX + 4,
-          bgY + 4,
-          this.tileSize - 8,
-          this.tileSize - 8,
-          8
-        );
-
-        // CRITICAL FIX: Create sprite with exact size immediately - no animations or delayed sizing
-        const tileSprite = this.add.sprite(worldX, worldY, tileKey);
-        tileSprite.setDisplaySize(imageSize, imageSize);
-        tileSprite.setDepth(2);
-
-        // Store data
-        tileSprite.setData("gridRow", row);
-        tileSprite.setData("gridCol", col);
-        tileSprite.setData("tileKey", tileKey);
-        tileSprite.setData("baseWidth", imageSize);
-        tileSprite.setData("baseHeight", imageSize);
-
-        // Make interactive and add to group
-        tileSprite.setInteractive();
-        this.tileSprites.add(tileSprite);
 
         // Add to grid
         this.grid[row][col] = tileSprite;
-
-        // NO initial animations - they will display immediately at the correct size
       }
     }
 
     console.log("Grid initialization complete without animations");
 
-    // Optionally show a welcome message after a short delay
+    // Show a welcome message after a short delay
     this.time.delayedCall(500, () => {
       this.showMascotMessage("开始吧!");
     });
   }
 
-  // We can keep the old initializeGrid method for when we want to reinitialize with animations
-  // like after restarting the game, but rename it to make its purpose clear
+  /**
+   * Initialize the grid with enter animations for each tile
+   */
   initializeGridWithAnimations() {
     console.log("Initializing grid with animations...");
     this.tileBackgrounds.clear();
@@ -508,53 +599,25 @@ export class GameScene extends Phaser.Scene {
     for (let row = 0; row < GRID_HEIGHT; row++) {
       this.grid[row] = [];
       for (let col = 0; col < GRID_WIDTH; col++) {
+        // Create tile background
+        this._createTileBackground(row, col);
+
+        // Create tile sprite
         const tileKey = getRandomTileKey();
-        const worldX = Math.floor(
-          this.gridOffsetX + col * this.tileSize + this.tileSize / 2
-        );
-        const worldY = Math.floor(
-          this.gridOffsetY + row * this.tileSize + this.tileSize / 2
-        );
-
-        // Draw tile background
-        const bgX = Math.floor(this.gridOffsetX + col * this.tileSize);
-        const bgY = Math.floor(this.gridOffsetY + row * this.tileSize);
-
-        this.tileBackgrounds.fillRoundedRect(
-          bgX + 4,
-          bgY + 4,
-          this.tileSize - 8,
-          this.tileSize - 8,
-          8
-        );
-        this.tileBackgrounds.strokeRoundedRect(
-          bgX + 4,
-          bgY + 4,
-          this.tileSize - 8,
-          this.tileSize - 8,
-          8
-        );
+        const worldX = this._getWorldX(col);
+        const worldY = this._getWorldY(row);
 
         // Create sprite with exact size
-        const tileSprite = this.add.sprite(worldX, worldY, tileKey);
-        tileSprite.setDisplaySize(imageSize, imageSize);
-        tileSprite.setDepth(2);
+        const tileSprite = this._createTileSprite(
+          tileKey,
+          worldX,
+          worldY,
+          imageSize,
+          row,
+          col
+        );
 
-        // Store data
-        tileSprite.setData("gridRow", row);
-        tileSprite.setData("gridCol", col);
-        tileSprite.setData("tileKey", tileKey);
-        tileSprite.setData("baseWidth", imageSize);
-        tileSprite.setData("baseHeight", imageSize);
-
-        // Make interactive and add to group
-        tileSprite.setInteractive();
-        this.tileSprites.add(tileSprite);
-
-        // Add to grid
-        this.grid[row][col] = tileSprite;
-
-        // Now we can add entry animation since we've already set the correct size
+        // Add entry animation
         tileSprite.setScale(0);
         this.tweens.add({
           targets: tileSprite,
@@ -563,6 +626,9 @@ export class GameScene extends Phaser.Scene {
           delay: (row * 8 + col) * 25,
           ease: "Back.easeOut",
         });
+
+        // Add to grid
+        this.grid[row][col] = tileSprite;
       }
     }
 
@@ -572,7 +638,489 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // --- MODIFY: checkForMatches to track match patterns ---
+  /**
+   * Create a background for a tile at the specified position
+   * @private
+   */
+  _createTileBackground(row, col) {
+    const bgX = Math.floor(this.gridOffsetX + col * this.tileSize);
+    const bgY = Math.floor(this.gridOffsetY + row * this.tileSize);
+
+    this.tileBackgrounds.fillRoundedRect(
+      bgX + 4,
+      bgY + 4,
+      this.tileSize - 8,
+      this.tileSize - 8,
+      8
+    );
+    this.tileBackgrounds.strokeRoundedRect(
+      bgX + 4,
+      bgY + 4,
+      this.tileSize - 8,
+      this.tileSize - 8,
+      8
+    );
+  }
+
+  /**
+   * Create a tile sprite with the correct properties
+   * @private
+   */
+  _createTileSprite(tileKey, x, y, size, row, col) {
+    const tileSprite = this.add.sprite(x, y, tileKey);
+    tileSprite.setDisplaySize(size, size);
+    tileSprite.setDepth(2);
+
+    // Store data
+    tileSprite.setData("gridRow", row);
+    tileSprite.setData("gridCol", col);
+    tileSprite.setData("tileKey", tileKey);
+    tileSprite.setData("baseWidth", size);
+    tileSprite.setData("baseHeight", size);
+
+    // Make interactive and add to group
+    tileSprite.setInteractive();
+    this.tileSprites.add(tileSprite);
+
+    return tileSprite;
+  }
+
+  /**
+   * Collapse the grid after matches are removed, moving tiles down to fill gaps
+   */
+  collapseGrid() {
+    console.log("Collapsing grid...");
+    let pendingTiles = 0;
+    let hasEmptyCells = false;
+
+    // First, move all existing tiles down to fill gaps
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      // Start from the bottom of each column and work up
+      for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
+        if (this.grid[row][col] === null) {
+          hasEmptyCells = true;
+
+          // Look for the nearest tile above to move down
+          let foundTile = false;
+          for (let aboveRow = row - 1; aboveRow >= 0; aboveRow--) {
+            if (this.grid[aboveRow][col] !== null) {
+              // Found a tile to move down
+              const tileToMove = this.grid[aboveRow][col];
+
+              // Update the grid data
+              this.grid[row][col] = tileToMove;
+              this.grid[aboveRow][col] = null;
+
+              // Update the tile's data
+              tileToMove.setData("gridRow", row);
+
+              // Calculate new position
+              const newY = this._getWorldY(row);
+
+              // Animate the tile moving down
+              pendingTiles++;
+              this.tweens.add({
+                targets: tileToMove,
+                y: newY,
+                duration: 300,
+                ease: "Bounce.easeOut",
+                onComplete: () => {
+                  pendingTiles--;
+                  if (pendingTiles === 0) {
+                    this.refillEmptySpaces();
+                  }
+                },
+              });
+
+              foundTile = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // If no animations were started but we have empty cells, manually call refill
+    if (pendingTiles === 0 && hasEmptyCells) {
+      this.refillEmptySpaces();
+    } else if (pendingTiles === 0 && !hasEmptyCells) {
+      // No empty spaces at all
+      this.isProcessingMatches = false;
+      this.canSelect = true;
+    }
+  }
+
+  /**
+   * Refill empty spaces in the grid with new tiles
+   */
+  refillEmptySpaces() {
+    console.log("Refilling empty spaces...");
+    let pendingTiles = 0;
+
+    // Calculate proper image size
+    const properTileSize = Math.min(
+      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
+      this.tileSize - TILE_PADDING * 2
+    );
+    const imageSize = properTileSize * TILE_IMAGE_SCALE;
+
+    // Scan entire grid for null spaces and fill them
+    for (let col = 0; col < GRID_WIDTH; col++) {
+      for (let row = 0; row < GRID_HEIGHT; row++) {
+        if (this.grid[row][col] === null) {
+          // Create a new tile
+          const tileKey = getRandomTileKey();
+
+          // Calculate position (start above the grid)
+          const worldX = this._getWorldX(col);
+          const startY = Math.floor(this.gridOffsetY - this.tileSize); // Start above grid
+          const finalY = this._getWorldY(row);
+
+          // Create the sprite with exact size immediately
+          const tileSprite = this.add.sprite(worldX, startY, tileKey);
+          tileSprite.setDisplaySize(imageSize, imageSize);
+          tileSprite.setDepth(2);
+          tileSprite.setData("gridRow", row);
+          tileSprite.setData("gridCol", col);
+          tileSprite.setData("tileKey", tileKey);
+          tileSprite.setData("baseWidth", imageSize);
+          tileSprite.setData("baseHeight", imageSize);
+
+          // Make interactive
+          tileSprite.setInteractive();
+          this.tileSprites.add(tileSprite);
+
+          // Update grid data
+          this.grid[row][col] = tileSprite;
+
+          // Animate falling
+          pendingTiles++;
+          this.tweens.add({
+            targets: tileSprite,
+            y: finalY,
+            duration: 500,
+            ease: "Bounce.easeOut",
+            delay: row * 50, // Stagger the drops slightly
+            onComplete: () => {
+              pendingTiles--;
+              if (pendingTiles === 0) {
+                // After all new tiles are in place, check for new matches
+                this.checkAfterRefill();
+              }
+            },
+          });
+        }
+      }
+    }
+
+    // If no new tiles were needed, still check for matches
+    if (pendingTiles === 0) {
+      this.checkAfterRefill();
+    }
+  }
+
+  /**
+   * Check for matches after refilling the grid
+   */
+  checkAfterRefill() {
+    const newMatches = this.checkForMatches();
+
+    if (newMatches.length > 0) {
+      console.log(
+        `Cascade! Found ${newMatches.length} more matches after refill`
+      );
+      // Play sound if enabled
+      this.playSound("combo");
+      this.processMatches(newMatches);
+    } else {
+      // No more matches, end the chain
+      console.log("No more cascading matches");
+      this.isProcessingMatches = false;
+      this.canSelect = true;
+
+      // Check if game is over
+      if (this.moves <= 0) {
+        this.gameOver();
+      }
+    }
+  }
+
+  // =============================================================================
+  // TILE MANAGEMENT
+  // =============================================================================
+
+  /**
+   * Handle pointerdown on a tile
+   */
+  onTilePointerDown(pointer, gameObject) {
+    if (!this.canSelect || !this.tileSprites.contains(gameObject)) {
+      return;
+    }
+
+    const clickedTile = gameObject;
+    const specialType = clickedTile.getData("specialType");
+
+    // Skip special tiles - they can't be selected
+    if (specialType) {
+      console.log(
+        "Special tiles auto-activate and cannot be manually selected"
+      );
+      return;
+    }
+
+    // Select the tile
+    this.deselectTile(); // Clear any previous selection
+    this.selectTile(clickedTile);
+  }
+
+  /**
+   * Handle pointerup event to detect swaps
+   */
+  onPointerUp(pointer) {
+    if (!this.selectedTile || !this.canSelect) {
+      return;
+    }
+
+    // Get the tile under the pointer (if any)
+    const targetPosition = pointer.position;
+    let targetTile = null;
+
+    // Find if we're over a tile
+    this.tileSprites.getChildren().forEach((tile) => {
+      if (
+        Phaser.Geom.Rectangle.Contains(
+          tile.getBounds(),
+          targetPosition.x,
+          targetPosition.y
+        )
+      ) {
+        targetTile = tile;
+      }
+    });
+
+    if (targetTile && targetTile !== this.selectedTile) {
+      // Check if they're adjacent
+      const selectedRow = this.selectedTile.getData("gridRow");
+      const selectedCol = this.selectedTile.getData("gridCol");
+      const targetRow = targetTile.getData("gridRow");
+      const targetCol = targetTile.getData("gridCol");
+
+      const dx = Math.abs(targetCol - selectedCol);
+      const dy = Math.abs(targetRow - selectedRow);
+
+      if (dx + dy === 1) {
+        console.log(
+          `Swapping [${selectedRow},${selectedCol}] with [${targetRow},${targetCol}]`
+        );
+        this.swapTiles(this.selectedTile, targetTile);
+      } else {
+        // Not adjacent - deselect the current tile and select the new one
+        this.deselectTile();
+      }
+    } else {
+      // Released not over a valid target - just deselect
+      this.deselectTile();
+    }
+  }
+
+  /**
+   * Select a tile with animation
+   */
+  selectTile(tile) {
+    if (!tile) return;
+    this.selectedTile = tile;
+
+    // Get the base dimensions
+    const baseWidth = tile.getData("baseWidth");
+    const baseHeight = tile.getData("baseHeight");
+
+    // Use a reduced scale factor to prevent overlapping
+    this.tweens.add({
+      targets: tile,
+      displayWidth: baseWidth * 1.1,
+      displayHeight: baseHeight * 1.1,
+      duration: 200,
+      ease: "Back.easeOut",
+    });
+
+    // Add a smaller float effect
+    this.tweens.add({
+      targets: tile,
+      y: tile.y - 3,
+      duration: 200,
+      ease: "Sine.easeOut",
+    });
+
+    console.log(
+      `Selected tile at [${tile.getData("gridRow")}, ${tile.getData(
+        "gridCol"
+      )}]`
+    );
+  }
+
+  /**
+   * Deselect a tile, returning it to normal state
+   */
+  deselectTile() {
+    if (!this.selectedTile) return;
+
+    // Get the base dimensions
+    const baseWidth = this.selectedTile.getData("baseWidth");
+    const baseHeight = this.selectedTile.getData("baseHeight");
+    const row = this.selectedTile.getData("gridRow");
+    const originalY = this._getWorldY(row);
+
+    // Return to original size and position
+    this.tweens.add({
+      targets: this.selectedTile,
+      displayWidth: baseWidth,
+      displayHeight: baseHeight,
+      y: originalY,
+      duration: 200,
+      ease: "Sine.easeOut",
+    });
+
+    console.log(
+      `Deselected tile at [${this.selectedTile.getData(
+        "gridRow"
+      )}, ${this.selectedTile.getData("gridCol")}]`
+    );
+    this.selectedTile = null;
+  }
+
+  /**
+   * Swap two tiles
+   */
+  swapTiles(tile1, tile2) {
+    if (!tile1 || !tile2) return;
+
+    this.canSelect = false;
+
+    const tile1Row = tile1.getData("gridRow");
+    const tile1Col = tile1.getData("gridCol");
+    const tile2Row = tile2.getData("gridRow");
+    const tile2Col = tile2.getData("gridCol");
+
+    // Update grid data structure
+    this.grid[tile1Row][tile1Col] = tile2;
+    this.grid[tile2Row][tile2Col] = tile1;
+
+    // Update data stored in sprites
+    tile1.setData("gridRow", tile2Row);
+    tile1.setData("gridCol", tile2Col);
+    tile2.setData("gridRow", tile1Row);
+    tile2.setData("gridCol", tile1Col);
+
+    // Animate the visual swap
+    const targetX1 = tile2.x;
+    const targetY1 = tile2.y;
+    const targetX2 = tile1.x;
+    const targetY2 = tile1.y;
+    const swapDuration = 200;
+
+    // Deselect the visually selected tile before animation
+    this.deselectTile();
+
+    this.tweens.add({
+      targets: tile1,
+      x: targetX1,
+      y: targetY1,
+      duration: swapDuration,
+      ease: "Power2",
+    });
+
+    this.tweens.add({
+      targets: tile2,
+      x: targetX2,
+      y: targetY2,
+      duration: swapDuration,
+      ease: "Power2",
+      onComplete: () => {
+        console.log("Swap animation complete. Checking for matches...");
+
+        // Decrement move counter
+        this.moves--;
+        this.updateMovesText();
+
+        // Check for matches
+        const matchedTiles = this.checkForMatches();
+
+        if (matchedTiles.length > 0) {
+          // We found matches - start the match/collapse/refill process
+          this.processMatches(matchedTiles);
+        } else {
+          // No matches - swap back (invalid move)
+          console.log("No matches found. Swapping back...");
+          this.swapBack(tile1, tile2);
+        }
+
+        // Play swap sound
+        this.playSound("swap");
+      },
+    });
+  }
+
+  /**
+   * Swap tiles back when a move doesn't result in matches
+   */
+  swapBack(tile1, tile2) {
+    // Swap positions back immediately without changing moves
+    const tile1Row = tile1.getData("gridRow");
+    const tile1Col = tile1.getData("gridCol");
+    const tile2Row = tile2.getData("gridRow");
+    const tile2Col = tile2.getData("gridCol");
+
+    // Update grid data structure
+    this.grid[tile1Row][tile1Col] = tile2;
+    this.grid[tile2Row][tile2Col] = tile1;
+
+    // Update data stored in sprites
+    tile1.setData("gridRow", tile2Row);
+    tile1.setData("gridCol", tile2Col);
+    tile2.setData("gridRow", tile1Row);
+    tile2.setData("gridCol", tile1Col);
+
+    // Animate the visual swap back
+    const targetX1 = tile2.x;
+    const targetY1 = tile2.y;
+    const targetX2 = tile1.x;
+    const targetY2 = tile1.y;
+    const swapDuration = 200;
+
+    this.tweens.add({
+      targets: tile1,
+      x: targetX1,
+      y: targetY1,
+      duration: swapDuration,
+      ease: "Power2",
+    });
+
+    this.tweens.add({
+      targets: tile2,
+      x: targetX2,
+      y: targetY2,
+      duration: swapDuration,
+      ease: "Power2",
+      onComplete: () => {
+        // Add the move back since it wasn't a valid move
+        this.moves++;
+        this.updateMovesText();
+        this.canSelect = true;
+
+        // Play error sound
+        this.playSound("error");
+      },
+    });
+  }
+
+  // =============================================================================
+  // MATCH DETECTION & PROCESSING
+  // =============================================================================
+
+  /**
+   * Check the grid for matches of 3 or more tiles
+   * @returns {Array} Array of matched tile sprites
+   */
   checkForMatches() {
     let matchedTiles = [];
     let matchPatterns = []; // Store match pattern information
@@ -699,7 +1247,10 @@ export class GameScene extends Phaser.Scene {
     return matchedTiles;
   }
 
-  // --- MODIFY: processMatches to auto-activate special tiles ---
+  /**
+   * Process matched tiles, update score, and create special tiles
+   * @param {Array} matchedTiles Array of tile sprites that match
+   */
   processMatches(matchedTiles) {
     if (matchedTiles.length === 0) {
       this.canSelect = true;
@@ -722,40 +1273,76 @@ export class GameScene extends Phaser.Scene {
       this.showMascotMessage("真厉害!");
     }
 
-    // --- Special match detection logic ---
-    let specialTileInfo = null;
+    // Special match detection logic
+    let specialTileInfo = this._determineSpecialTileCreation();
 
-    if (this.lastMatchPatterns && this.lastMatchPatterns.length > 0) {
-      for (const pattern of this.lastMatchPatterns) {
-        if (pattern.length >= 4) {
-          // Found a match that would create a special tile
-          specialTileInfo = {
-            pattern: pattern,
-            row:
-              pattern.type === "horizontal"
-                ? pattern.row
-                : pattern.row + Math.floor(pattern.length / 2),
-            col:
-              pattern.type === "horizontal"
-                ? pattern.col + Math.floor(pattern.length / 2)
-                : pattern.col,
-            type:
-              pattern.length >= 5
-                ? "rainbow"
-                : pattern.type === "horizontal"
-                ? "horizontal_line"
-                : "vertical_line",
-          };
+    // Remove matched tiles with cute effects
+    this._removeMatchedTiles(matchedTiles, specialTileInfo);
 
-          // Prioritize longer matches
-          if (pattern.length >= 5) {
-            break; // Rainbow powerup takes precedence
-          }
+    // Handle special tile logic after a delay
+    if (specialTileInfo) {
+      this.time.delayedCall(350, () => {
+        const specialTile = this.createSpecialTile(specialTileInfo);
+
+        this.time.delayedCall(500, () => {
+          this.autoActivateSpecialTile(specialTile);
+        });
+      });
+    } else {
+      this.time.delayedCall(400, () => {
+        this.collapseGrid();
+      });
+    }
+  }
+
+  /**
+   * Determine if a special tile should be created from the match patterns
+   * @private
+   * @returns {Object|null} Special tile information or null
+   */
+  _determineSpecialTileCreation() {
+    if (!this.lastMatchPatterns || this.lastMatchPatterns.length === 0) {
+      return null;
+    }
+
+    for (const pattern of this.lastMatchPatterns) {
+      if (pattern.length >= 4) {
+        // Found a match that would create a special tile
+        return {
+          pattern: pattern,
+          row:
+            pattern.type === "horizontal"
+              ? pattern.row
+              : pattern.row + Math.floor(pattern.length / 2),
+          col:
+            pattern.type === "horizontal"
+              ? pattern.col + Math.floor(pattern.length / 2)
+              : pattern.col,
+          type:
+            pattern.length >= 5
+              ? SPECIAL_TYPES.RAINBOW
+              : pattern.type === "horizontal"
+              ? SPECIAL_TYPES.HORIZONTAL_LINE
+              : SPECIAL_TYPES.VERTICAL_LINE,
+        };
+
+        // Prioritize longer matches
+        if (pattern.length >= 5) {
+          break; // Rainbow powerup takes precedence
         }
       }
     }
 
-    // Remove matched tiles with cute effects
+    return null;
+  }
+
+  /**
+   * Remove matched tiles with animations
+   * @private
+   * @param {Array} matchedTiles Array of tiles to remove
+   * @param {Object|null} specialTileInfo Special tile to create (if any)
+   */
+  _removeMatchedTiles(matchedTiles, specialTileInfo) {
     matchedTiles.forEach((tile) => {
       // Skip if this position will be used for a special tile
       if (
@@ -783,12 +1370,12 @@ export class GameScene extends Phaser.Scene {
         // Create smaller sparkle effect
         this.createSparkleEffect(tile.x, tile.y);
 
-        // IMPORTANT FIX: Animate with smaller scale to prevent overlapping
+        // Animate with smaller scale to prevent overlapping
         this.tweens.add({
           targets: tile,
           alpha: 0,
-          scale: 1.2, // Reduced from 1.5 to 1.2
-          angle: Phaser.Math.Between(-20, 20), // Smaller angle range
+          scale: 1.2,
+          angle: Phaser.Math.Between(-20, 20),
           duration: 300,
           ease: "Back.easeIn",
           onComplete: () => {
@@ -797,24 +1384,13 @@ export class GameScene extends Phaser.Scene {
         });
       }
     });
-
-    // Handle special tile logic
-    if (specialTileInfo) {
-      this.time.delayedCall(350, () => {
-        const specialTile = this.createSpecialTile(specialTileInfo);
-
-        this.time.delayedCall(500, () => {
-          this.autoActivateSpecialTile(specialTile);
-        });
-      });
-    } else {
-      this.time.delayedCall(400, () => {
-        this.collapseGrid();
-      });
-    }
   }
 
-  // --- MODIFY: createSpecialTile to use the matched food type as the sprite texture ---
+  /**
+   * Create a special tile at the specified position
+   * @param {Object} info Information about the special tile to create
+   * @returns {Phaser.GameObjects.Sprite} The created special tile
+   */
   createSpecialTile(info) {
     const { row, col, type, pattern } = info;
 
@@ -825,22 +1401,18 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Calculate position
-    const worldX = Math.floor(
-      this.gridOffsetX + col * this.tileSize + this.tileSize / 2
-    );
-    const worldY = Math.floor(
-      this.gridOffsetY + row * this.tileSize + this.tileSize / 2
-    );
+    const worldX = this._getWorldX(col);
+    const worldY = this._getWorldY(row);
 
-    // CHANGE: Use the matched food type (pattern.tileKey) instead of the static type image
+    // Use the matched food type instead of the static type image
     const specialTile = this.add.sprite(worldX, worldY, pattern.tileKey);
-    specialTile.setDepth(1);
+    specialTile.setDepth(2);
     specialTile.setData("gridRow", row);
     specialTile.setData("gridCol", col);
     specialTile.setData("tileKey", pattern.tileKey);
-    specialTile.setData("specialType", type); // Still store the special type for gameplay logic
+    specialTile.setData("specialType", type); // Store the special type for gameplay logic
 
-    // IMPORTANT FIX: Properly size special tiles to be slightly smaller than regular tiles
+    // Properly size special tiles
     const properTileSize = Math.min(
       Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
       this.tileSize - TILE_PADDING * 2
@@ -853,19 +1425,19 @@ export class GameScene extends Phaser.Scene {
     specialTile.setData("baseHeight", baseHeight);
 
     // Add visual indicators to show this is a special tile
-    // CHANGE: Use a colored tint rather than completely replacing the food image
-    if (type === "horizontal_line") {
+    // Use a colored tint rather than completely replacing the food image
+    if (type === SPECIAL_TYPES.HORIZONTAL_LINE) {
       specialTile.setTint(0x00ffff); // Cyan tint for horizontal line clearer
-    } else if (type === "vertical_line") {
+    } else if (type === SPECIAL_TYPES.VERTICAL_LINE) {
       specialTile.setTint(0xff00ff); // Magenta tint for vertical line clearer
-    } else if (type === "rainbow") {
+    } else if (type === SPECIAL_TYPES.RAINBOW) {
       specialTile.setTint(0xffff00); // Yellow tint for rainbow tile
     }
 
     // Make it pulse briefly
     this.tweens.add({
       targets: specialTile,
-      scale: 1.2, // Reduced scale factor to prevent overlapping
+      scale: 1.2,
       duration: 300,
       yoyo: true,
     });
@@ -881,7 +1453,10 @@ export class GameScene extends Phaser.Scene {
     return specialTile;
   }
 
-  // --- NEW: Method to automatically activate special tile ---
+  /**
+   * Automatically activate a special tile and its effects
+   * @param {Phaser.GameObjects.Sprite} specialTile The special tile to activate
+   */
   autoActivateSpecialTile(specialTile) {
     if (!specialTile) return;
 
@@ -896,7 +1471,7 @@ export class GameScene extends Phaser.Scene {
     let tilesToClear = [];
 
     switch (specialType) {
-      case "horizontal_line":
+      case SPECIAL_TYPES.HORIZONTAL_LINE:
         // Clear entire row
         for (let c = 0; c < GRID_WIDTH; c++) {
           if (this.grid[row][c] && this.grid[row][c] !== specialTile) {
@@ -905,7 +1480,7 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
-      case "vertical_line":
+      case SPECIAL_TYPES.VERTICAL_LINE:
         // Clear entire column
         for (let r = 0; r < GRID_HEIGHT; r++) {
           if (this.grid[r][col] && this.grid[r][col] !== specialTile) {
@@ -914,7 +1489,7 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
-      case "bomb":
+      case SPECIAL_TYPES.BOMB:
         // Clear 3x3 area
         for (
           let r = Math.max(0, row - 1);
@@ -933,7 +1508,7 @@ export class GameScene extends Phaser.Scene {
         }
         break;
 
-      case "rainbow":
+      case SPECIAL_TYPES.RAINBOW:
         // For rainbow, clear all tiles of a random type
         const types = ASSET_KEYS.filter(
           (key) => key !== specialTile.getData("tileKey")
@@ -992,364 +1567,31 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // --- NEW: Add pointer down handler ---
-  onTilePointerDown(pointer, gameObject) {
-    if (!this.canSelect || !this.tileSprites.contains(gameObject)) {
-      return;
-    }
+  // =============================================================================
+  // GAME STATE MANAGEMENT
+  // =============================================================================
 
-    const clickedTile = gameObject;
-    const specialType = clickedTile.getData("specialType");
-
-    // Skip special tiles - they can't be selected
-    if (specialType) {
-      console.log(
-        "Special tiles auto-activate and cannot be manually selected"
-      );
-      return;
-    }
-
-    // Select the tile
-    this.deselectTile(); // Clear any previous selection
-    this.selectTile(clickedTile);
-  }
-
-  // --- NEW: Add pointer up handler ---
-  onPointerUp(pointer) {
-    if (!this.selectedTile || !this.canSelect) {
-      return;
-    }
-
-    // Get the tile under the pointer (if any)
-    const targetPosition = pointer.position;
-    let targetTile = null;
-
-    // Find if we're over a tile
-    this.tileSprites.getChildren().forEach((tile) => {
-      if (
-        Phaser.Geom.Rectangle.Contains(
-          tile.getBounds(),
-          targetPosition.x,
-          targetPosition.y
-        )
-      ) {
-        targetTile = tile;
-      }
-    });
-
-    if (targetTile && targetTile !== this.selectedTile) {
-      // Check if they're adjacent
-      const selectedRow = this.selectedTile.getData("gridRow");
-      const selectedCol = this.selectedTile.getData("gridCol");
-      const targetRow = targetTile.getData("gridRow");
-      const targetCol = targetTile.getData("gridCol");
-
-      const dx = Math.abs(targetCol - selectedCol);
-      const dy = Math.abs(targetRow - selectedRow);
-
-      if (dx + dy === 1) {
-        console.log(
-          `Swapping [${selectedRow},${selectedCol}] with [${targetRow},${targetCol}]`
-        );
-        this.swapTiles(this.selectedTile, targetTile);
-      } else {
-        // Not adjacent - deselect the current tile and select the new one
-        this.deselectTile();
-      }
-    } else {
-      // Released not over a valid target - just deselect
-      this.deselectTile();
+  /**
+   * Update score text display
+   */
+  updateScoreText() {
+    if (this.scoreText) {
+      this.scoreText.setText(`分数: ${this.score}`);
     }
   }
 
-  // --- NEW: Swap Tiles ---
-  swapTiles(tile1, tile2) {
-    if (!tile1 || !tile2) return;
-
-    this.canSelect = false;
-
-    const tile1Row = tile1.getData("gridRow");
-    const tile1Col = tile1.getData("gridCol");
-    const tile2Row = tile2.getData("gridRow");
-    const tile2Col = tile2.getData("gridCol");
-
-    // Update grid data structure
-    this.grid[tile1Row][tile1Col] = tile2;
-    this.grid[tile2Row][tile2Col] = tile1;
-
-    // Update data stored in sprites
-    tile1.setData("gridRow", tile2Row);
-    tile1.setData("gridCol", tile2Col);
-    tile2.setData("gridRow", tile1Row);
-    tile2.setData("gridCol", tile1Col);
-
-    // Animate the visual swap
-    const targetX1 = tile2.x;
-    const targetY1 = tile2.y;
-    const targetX2 = tile1.x;
-    const targetY2 = tile1.y;
-    const swapDuration = 200;
-
-    // Deselect the visually selected tile before animation
-    this.deselectTile();
-
-    this.tweens.add({
-      targets: tile1,
-      x: targetX1,
-      y: targetY1,
-      duration: swapDuration,
-      ease: "Power2",
-    });
-
-    this.tweens.add({
-      targets: tile2,
-      x: targetX2,
-      y: targetY2,
-      duration: swapDuration,
-      ease: "Power2",
-      onComplete: () => {
-        console.log("Swap animation complete. Checking for matches...");
-
-        // --- CHANGE: Decrement move counter ---
-        this.moves--;
-        this.updateMovesText();
-        // --------------------------------
-
-        // --- CHANGE: Check for matches ---
-        const matchedTiles = this.checkForMatches();
-
-        if (matchedTiles.length > 0) {
-          // We found matches - start the match/collapse/refill process
-          this.processMatches(matchedTiles);
-        } else {
-          // No matches - swap back (invalid move)
-          console.log("No matches found. Swapping back...");
-          this.swapBack(tile1, tile2);
-        }
-        // --------------------------------
-
-        // --- ADD: Play swap sound ---
-        this.playSound("swap");
-      },
-    });
-  }
-
-  // --- NEW: Swap tiles back ---
-  swapBack(tile1, tile2) {
-    // Swap positions back immediately without changing moves
-    const tile1Row = tile1.getData("gridRow");
-    const tile1Col = tile1.getData("gridCol");
-    const tile2Row = tile2.getData("gridRow");
-    const tile2Col = tile2.getData("gridCol");
-
-    // Update grid data structure
-    this.grid[tile1Row][tile1Col] = tile2;
-    this.grid[tile2Row][tile2Col] = tile1;
-
-    // Update data stored in sprites
-    tile1.setData("gridRow", tile2Row);
-    tile1.setData("gridCol", tile2Col);
-    tile2.setData("gridRow", tile1Row);
-    tile2.setData("gridCol", tile1Col);
-
-    // Animate the visual swap back
-    const targetX1 = tile2.x;
-    const targetY1 = tile2.y;
-    const targetX2 = tile1.x;
-    const targetY2 = tile1.y;
-    const swapDuration = 200;
-
-    this.tweens.add({
-      targets: tile1,
-      x: targetX1,
-      y: targetY1,
-      duration: swapDuration,
-      ease: "Power2",
-    });
-
-    this.tweens.add({
-      targets: tile2,
-      x: targetX2,
-      y: targetY2,
-      duration: swapDuration,
-      ease: "Power2",
-      onComplete: () => {
-        // Add the move back since it wasn't a valid move
-        this.moves++;
-        this.updateMovesText();
-        this.canSelect = true;
-
-        // --- ADD: Play error sound ---
-        this.playSound("error");
-      },
-    });
-  }
-
-  // --- FIX: Improve collapseGrid to handle empty spaces better ---
-  collapseGrid() {
-    console.log("Collapsing grid...");
-    let pendingTiles = 0;
-    let hasEmptyCells = false;
-
-    // First, move all existing tiles down to fill gaps
-    for (let col = 0; col < GRID_WIDTH; col++) {
-      // Start from the bottom of each column and work up
-      for (let row = GRID_HEIGHT - 1; row >= 0; row--) {
-        if (this.grid[row][col] === null) {
-          hasEmptyCells = true;
-
-          // Look for the nearest tile above to move down
-          let foundTile = false;
-          for (let aboveRow = row - 1; aboveRow >= 0; aboveRow--) {
-            if (this.grid[aboveRow][col] !== null) {
-              // Found a tile to move down
-              const tileToMove = this.grid[aboveRow][col];
-
-              // Update the grid data
-              this.grid[row][col] = tileToMove;
-              this.grid[aboveRow][col] = null;
-
-              // Update the tile's data
-              tileToMove.setData("gridRow", row);
-
-              // Calculate new position
-              const newY =
-                this.gridOffsetY + row * this.tileSize + this.tileSize / 2;
-
-              // Animate the tile moving down
-              pendingTiles++;
-              this.tweens.add({
-                targets: tileToMove,
-                y: newY,
-                duration: 300,
-                ease: "Bounce.easeOut",
-                onComplete: () => {
-                  pendingTiles--;
-                  if (pendingTiles === 0) {
-                    this.refillEmptySpaces();
-                  }
-                },
-              });
-
-              foundTile = true;
-              break;
-            }
-          }
-
-          // If no tile was found above, this space needs a new tile
-          if (!foundTile) {
-            // We'll handle this in refillEmptySpaces
-          }
-        }
-      }
-    }
-
-    // If no animations were started but we have empty cells, manually call refill
-    if (pendingTiles === 0 && hasEmptyCells) {
-      this.refillEmptySpaces();
-    } else if (pendingTiles === 0 && !hasEmptyCells) {
-      // No empty spaces at all
-      this.isProcessingMatches = false;
-      this.canSelect = true;
+  /**
+   * Update moves text display
+   */
+  updateMovesText() {
+    if (this.movesText) {
+      this.movesText.setText(`剩余步数: ${this.moves}`);
     }
   }
 
-  // --- NEW: Create a dedicated method for refilling empty spaces ---
-  refillEmptySpaces() {
-    console.log("Refilling empty spaces...");
-    let pendingTiles = 0;
-
-    // Calculate proper image size
-    const properTileSize = Math.min(
-      Math.floor(this.tileSize * TILE_SIZE_MULTIPLIER),
-      this.tileSize - TILE_PADDING * 2
-    );
-    const imageSize = properTileSize * TILE_IMAGE_SCALE;
-
-    // Scan entire grid for null spaces and fill them
-    for (let col = 0; col < GRID_WIDTH; col++) {
-      for (let row = 0; row < GRID_HEIGHT; row++) {
-        if (this.grid[row][col] === null) {
-          // Create a new tile
-          const tileKey = getRandomTileKey();
-
-          // Calculate position (start above the grid)
-          const worldX = Math.floor(
-            this.gridOffsetX + col * this.tileSize + this.tileSize / 2
-          );
-          const startY = Math.floor(this.gridOffsetY - this.tileSize); // Start one tile height above grid
-          const finalY = Math.floor(
-            this.gridOffsetY + row * this.tileSize + this.tileSize / 2
-          );
-
-          // CRITICAL FIX: Create the sprite with exact size immediately
-          const tileSprite = this.add.sprite(worldX, startY, tileKey);
-          tileSprite.setDisplaySize(imageSize, imageSize);
-          tileSprite.setDepth(2);
-          tileSprite.setData("gridRow", row);
-          tileSprite.setData("gridCol", col);
-          tileSprite.setData("tileKey", tileKey);
-          tileSprite.setData("baseWidth", imageSize);
-          tileSprite.setData("baseHeight", imageSize);
-
-          // Make interactive
-          tileSprite.setInteractive();
-          this.tileSprites.add(tileSprite);
-
-          // Update grid data
-          this.grid[row][col] = tileSprite;
-
-          // Animate falling
-          pendingTiles++;
-          this.tweens.add({
-            targets: tileSprite,
-            y: finalY,
-            duration: 500,
-            ease: "Bounce.easeOut",
-            delay: row * 50, // Stagger the drops slightly
-            onComplete: () => {
-              pendingTiles--;
-              if (pendingTiles === 0) {
-                // After all new tiles are in place, check for new matches
-                this.checkAfterRefill();
-              }
-            },
-          });
-        }
-      }
-    }
-
-    // If no new tiles were needed, still check for matches
-    if (pendingTiles === 0) {
-      this.checkAfterRefill();
-    }
-  }
-
-  // --- NEW: Check for matches after refilling ---
-  checkAfterRefill() {
-    const newMatches = this.checkForMatches();
-
-    if (newMatches.length > 0) {
-      console.log(
-        `Cascade! Found ${newMatches.length} more matches after refill`
-      );
-      // Play sound if enabled
-      this.playSound("combo");
-      this.processMatches(newMatches);
-    } else {
-      // No more matches, end the chain
-      console.log("No more cascading matches");
-      this.isProcessingMatches = false;
-      this.canSelect = true;
-
-      // Check if game is over
-      if (this.moves <= 0) {
-        this.gameOver();
-      }
-    }
-  }
-
-  // --- NEW: Game over ---
+  /**
+   * Show game over screen with final score
+   */
   gameOver() {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
@@ -1481,21 +1723,13 @@ export class GameScene extends Phaser.Scene {
     this.showMascotMessage("下次会更好!");
   }
 
-  // --- NEW: Update score text ---
-  updateScoreText() {
-    if (this.scoreText) {
-      this.scoreText.setText(`分数: ${this.score}`);
-    }
-  }
+  // =============================================================================
+  // SOUND MANAGEMENT
+  // =============================================================================
 
-  // --- NEW: Update moves text ---
-  updateMovesText() {
-    if (this.movesText) {
-      this.movesText.setText(`剩余步数: ${this.moves}`);
-    }
-  }
-
-  // --- NEW: Method to load sounds on demand ---
+  /**
+   * Load sound effects
+   */
   loadSounds() {
     try {
       console.log("Attempting to load sound effects...");
@@ -1540,81 +1774,23 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // --- MODIFY: Helper method to play sounds ---
+  /**
+   * Play a sound effect if enabled
+   * @param {string} key Key of the sound to play
+   */
   playSound(key) {
     if (this.soundEnabled && this.soundsLoaded && this.sounds[key]) {
       this.sounds[key].play();
     }
   }
 
-  update(time, delta) {
-    // Game loop logic
-  }
+  // =============================================================================
+  // VISUAL EFFECTS
+  // =============================================================================
 
-  // --- MISSING: Select Tile ---
-  selectTile(tile) {
-    if (!tile) return;
-    this.selectedTile = tile;
-
-    // Get the base dimensions
-    const baseWidth = tile.getData("baseWidth");
-    const baseHeight = tile.getData("baseHeight");
-
-    // IMPORTANT FIX: Reduce the scale factor to prevent overlapping
-    this.tweens.add({
-      targets: tile,
-      displayWidth: baseWidth * 1.1, // Reduced from 1.2 to 1.1
-      displayHeight: baseHeight * 1.1, // Reduced from 1.2 to 1.1
-      duration: 200,
-      ease: "Back.easeOut",
-    });
-
-    // Add a smaller float effect
-    this.tweens.add({
-      targets: tile,
-      y: tile.y - 3, // Reduced from -5 to -3
-      duration: 200,
-      ease: "Sine.easeOut",
-    });
-
-    console.log(
-      `Selected tile at [${tile.getData("gridRow")}, ${tile.getData(
-        "gridCol"
-      )}]`
-    );
-  }
-
-  // --- MISSING: Deselect Tile ---
-  deselectTile() {
-    if (!this.selectedTile) return;
-
-    // Get the base dimensions
-    const baseWidth = this.selectedTile.getData("baseWidth");
-    const baseHeight = this.selectedTile.getData("baseHeight");
-    const originalY =
-      this.gridOffsetY +
-      this.selectedTile.getData("gridRow") * this.tileSize +
-      this.tileSize / 2;
-
-    // Return to original size and position
-    this.tweens.add({
-      targets: this.selectedTile,
-      displayWidth: baseWidth,
-      displayHeight: baseHeight,
-      y: originalY,
-      duration: 200,
-      ease: "Sine.easeOut",
-    });
-
-    console.log(
-      `Deselected tile at [${this.selectedTile.getData(
-        "gridRow"
-      )}, ${this.selectedTile.getData("gridCol")}]`
-    );
-    this.selectedTile = null;
-  }
-
-  // NEW: Create confetti effect
+  /**
+   * Create confetti effect for game over screen
+   */
   createConfetti() {
     const screenWidth = this.cameras.main.width;
     const screenHeight = this.cameras.main.height;
@@ -1650,7 +1826,10 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // NEW: Show message from mascot
+  /**
+   * Show message from mascot character
+   * @param {string} message Message to display
+   */
   showMascotMessage(message) {
     // Set the message text
     this.mascotText.setText(message);
@@ -1682,7 +1861,11 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // NEW: Create sparkle effect
+  /**
+   * Create sparkle effect at specified coordinates
+   * @param {number} x X coordinate
+   * @param {number} y Y coordinate
+   */
   createSparkleEffect(x, y) {
     const sparkleColors = [0xffffff, 0xffff00, 0xff9999];
 
@@ -1709,5 +1892,33 @@ export class GameScene extends Phaser.Scene {
         onComplete: () => sparkle.destroy(),
       });
     }
+  }
+
+  // =============================================================================
+  // UTILITY METHODS
+  // =============================================================================
+
+  /**
+   * Get the world X coordinate for a grid column
+   * @private
+   * @param {number} col Grid column
+   * @returns {number} World X coordinate
+   */
+  _getWorldX(col) {
+    return Math.floor(
+      this.gridOffsetX + col * this.tileSize + this.tileSize / 2
+    );
+  }
+
+  /**
+   * Get the world Y coordinate for a grid row
+   * @private
+   * @param {number} row Grid row
+   * @returns {number} World Y coordinate
+   */
+  _getWorldY(row) {
+    return Math.floor(
+      this.gridOffsetY + row * this.tileSize + this.tileSize / 2
+    );
   }
 }
