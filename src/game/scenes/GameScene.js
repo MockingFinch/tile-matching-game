@@ -814,7 +814,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // --- MODIFY: createSpecialTile to return the created tile ---
+  // --- MODIFY: createSpecialTile to use the matched food type as the sprite texture ---
   createSpecialTile(info) {
     const { row, col, type, pattern } = info;
 
@@ -832,13 +832,13 @@ export class GameScene extends Phaser.Scene {
       this.gridOffsetY + row * this.tileSize + this.tileSize / 2
     );
 
-    // Create the new special tile with proper sizing
-    const specialTile = this.add.sprite(worldX, worldY, type);
+    // CHANGE: Use the matched food type (pattern.tileKey) instead of the static type image
+    const specialTile = this.add.sprite(worldX, worldY, pattern.tileKey);
     specialTile.setDepth(1);
     specialTile.setData("gridRow", row);
     specialTile.setData("gridCol", col);
     specialTile.setData("tileKey", pattern.tileKey);
-    specialTile.setData("specialType", type);
+    specialTile.setData("specialType", type); // Still store the special type for gameplay logic
 
     // IMPORTANT FIX: Properly size special tiles to be slightly smaller than regular tiles
     const properTileSize = Math.min(
@@ -852,8 +852,15 @@ export class GameScene extends Phaser.Scene {
     specialTile.setData("baseWidth", baseWidth);
     specialTile.setData("baseHeight", baseHeight);
 
-    // Add visual effect for brief display
-    specialTile.setTint(0xffff00); // Yellow tint
+    // Add visual indicators to show this is a special tile
+    // CHANGE: Use a colored tint rather than completely replacing the food image
+    if (type === "horizontal_line") {
+      specialTile.setTint(0x00ffff); // Cyan tint for horizontal line clearer
+    } else if (type === "vertical_line") {
+      specialTile.setTint(0xff00ff); // Magenta tint for vertical line clearer
+    } else if (type === "rainbow") {
+      specialTile.setTint(0xffff00); // Yellow tint for rainbow tile
+    }
 
     // Make it pulse briefly
     this.tweens.add({
