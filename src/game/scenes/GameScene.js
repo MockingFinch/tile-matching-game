@@ -77,6 +77,10 @@ export class GameScene extends Phaser.Scene {
     this.moves = 20; // Starting moves
     this.isProcessingMatches = false;
     this.lastMatchPatterns = []; // Store match patterns for special tile creation
+    
+    // Add automatic board check timer
+    this.boardCheckTimer = null;
+    this.boardCheckDelay = 1000; // Check every 1 second
 
     // UI references
     this.scoreText = null;
@@ -150,13 +154,17 @@ export class GameScene extends Phaser.Scene {
 
     // Initialize sounds
     this._setupSounds();
+    
+    // Start the board check timer
+    this.startBoardCheckTimer();
   }
 
   /**
-   * Update function called each frame (not currently used)
+   * Update function called each frame
    */
   update(time, delta) {
-    // Game loop logic (currently empty)
+    // Game loop logic - we don't need to check matches here
+    // since we're using a timer for periodic checks
   }
 
   // =============================================================================
@@ -1895,5 +1903,273 @@ export class GameScene extends Phaser.Scene {
     return Math.floor(
       this.gridOffsetY + row * this.tileSize + this.tileSize / 2
     );
+  }
+
+  /**
+   * Start the timer that checks for possible matches
+   */
+  startBoardCheckTimer() {
+    // Clear any existing timer
+    if (this.boardCheckTimer) {
+      this.boardCheckTimer.remove();
+    }
+    
+    // Create a new timer that runs every second
+    this.boardCheckTimer = this.time.addEvent({
+      delay: this.boardCheckDelay,
+      callback: this.checkBoardForPotentialMatches,
+      callbackScope: this,
+      loop: true
+    });
+  }
+
+  /**
+   * Check if there are any potential matches on the board
+   * If not, reshuffle the board
+   */
+  checkBoardForPotentialMatches() {
+    // Skip check if we're already processing matches or the game is over
+    if (this.isProcessingMatches || !this.canSelect || this.moves <= 0) {
+      return;
+    }
+    
+    console.log("Checking for potential matches...");
+    
+    // Check if there are any potential matches
+    if (!this.hasPotentialMatches()) {
+      console.log("No potential matches found! Reshuffling board...");
+      this.showNotification("没有可能的匹配！重新洗牌...");
+      this.reshuffleBoard();
+    }
+  }
+
+  /**
+   * Check if there are any potential matches on the board
+   * @returns {boolean} True if there are potential matches, false otherwise
+   */
+  hasPotentialMatches() {
+    // Check horizontal swaps for potential matches
+    for (let row = 0; row < GRID_HEIGHT; row++) {
+      for (let col = 0; col < GRID_WIDTH - 1; col++) {
+        // Try swapping with the tile to the right
+        if (this.wouldCreateMatch(row, col, row, col + 1)) {
+          return true;
+        }
+      }
+    }
+    
+    // Check vertical swaps for potential matches
+    for (let row = 0; row < GRID_HEIGHT - 1; row++) {
+      for (let col = 0; col < GRID_WIDTH; col++) {
+        // Try swapping with the tile below
+        if (this.wouldCreateMatch(row, col, row + 1, col)) {
+          return true;
+        }
+      }
+    }
+    
+    // No potential matches found
+    return false;
+  }
+
+  /**
+   * Check if swapping two tiles would create a match
+   * @param {number} row1 Row of first tile
+   * @param {number} col1 Column of first tile
+   * @param {number} row2 Row of second tile
+   * @param {number} col2 Column of second tile
+   * @returns {boolean} True if the swap would create a match
+   */
+  wouldCreateMatch(row1, col1, row2, col2) {
+    // Get the tiles
+    const tile1 = this.grid[row1][col1];
+    const tile2 = this.grid[row2][col2];
+    
+    if (!tile1 || !tile2) {
+      return false;
+    }
+    
+    // Get tile keys
+    const key1 = tile1.getData("tileKey");
+    const key2 = tile2.getData("tileKey");
+    
+    // Skip if either tile is a special tile
+    if (tile1.getData("specialType") || tile2.getData("specialType")) {
+      return true; // Special tiles can always be matched
+    }
+    
+    // Create a copy of the grid for simulation
+    let tempGrid = this.grid.map(row => [...row]);
+    
+    // Simulate the swap
+    tempGrid[row1][col1] = tile2;
+    tempGrid[row2][col2] = tile1;
+    
+    // Check for horizontal matches for tile1's new position
+    if (this.checkForHorizontalMatch(tempGrid, row2, col1, key1)) {
+      return true;
+    }
+    
+    // Check for vertical matches for tile1's new position
+    if (this.checkForVerticalMatch(tempGrid, row2, col1, key1)) {
+      return true;
+    }
+    
+    // Check for horizontal matches for tile2's new position
+    if (this.checkForHorizontalMatch(tempGrid, row1, col2, key2)) {
+      return true;
+    }
+    
+    // Check for vertical matches for tile2's new position
+    if (this.checkForVerticalMatch(tempGrid, row1, col2, key2)) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Check for a horizontal match at the given position in the simulation grid
+   * @param {Array} tempGrid Temporary grid for simulation
+   * @param {number} row Row to check
+   * @param {number} col Column to check
+   * @param {string} key Tile key to match
+   * @returns {boolean} True if a match is found
+   */
+  checkForHorizontalMatch(tempGrid, row, col, key) {
+    // Count matching tiles to the left
+    let matchLeft = 0;
+    for (let c = col - 1; c >= 0; c--) {
+      const tile = tempGrid[row][c];
+      if (tile && tile.getData("tileKey") === key) {
+        matchLeft++;
+      } else {
+        break;
+      }
+    }
+    
+    // Count matching tiles to the right
+    let matchRight = 0;
+    for (let c = col + 1; c < GRID_WIDTH; c++) {
+      const tile = tempGrid[row][c];
+      if (tile && tile.getData("tileKey") === key) {
+        matchRight++;
+      } else {
+        break;
+      }
+    }
+    
+    // Check if we have at least 2 matches (for a total of 3 including the current tile)
+    return (matchLeft + matchRight + 1) >= 3;
+  }
+
+  /**
+   * Check for a vertical match at the given position in the simulation grid
+   * @param {Array} tempGrid Temporary grid for simulation
+   * @param {number} row Row to check
+   * @param {number} col Column to check
+   * @param {string} key Tile key to match
+   * @returns {boolean} True if a match is found
+   */
+  checkForVerticalMatch(tempGrid, row, col, key) {
+    // Count matching tiles above
+    let matchUp = 0;
+    for (let r = row - 1; r >= 0; r--) {
+      const tile = tempGrid[r][col];
+      if (tile && tile.getData("tileKey") === key) {
+        matchUp++;
+      } else {
+        break;
+      }
+    }
+    
+    // Count matching tiles below
+    let matchDown = 0;
+    for (let r = row + 1; r < GRID_HEIGHT; r++) {
+      const tile = tempGrid[r][col];
+      if (tile && tile.getData("tileKey") === key) {
+        matchDown++;
+      } else {
+        break;
+      }
+    }
+    
+    // Check if we have at least 2 matches (for a total of 3 including the current tile)
+    return (matchUp + matchDown + 1) >= 3;
+  }
+
+  /**
+   * Reshuffle the board when no matches are possible
+   */
+  reshuffleBoard() {
+    // Prevent user input during reshuffle
+    this.canSelect = false;
+    
+    // Animation to indicate reshuffling
+    const tiles = this.tileSprites.getChildren();
+    
+    // First fade all tiles slightly
+    this.tweens.add({
+      targets: tiles,
+      alpha: 0.5,
+      scale: 0.8,
+      duration: 300,
+      onComplete: () => {
+        // Randomize tile positions while maintaining grid structure
+        let tileKeys = [];
+        
+        // Collect all tile keys
+        for (let row = 0; row < GRID_HEIGHT; row++) {
+          for (let col = 0; col < GRID_WIDTH; col++) {
+            const tile = this.grid[row][col];
+            if (tile) {
+              tileKeys.push(tile.getData("tileKey"));
+            }
+          }
+        }
+        
+        // Shuffle the array of keys
+        tileKeys = Phaser.Utils.Array.Shuffle(tileKeys);
+        
+        // Assign new keys to tiles
+        let keyIndex = 0;
+        for (let row = 0; row < GRID_HEIGHT; row++) {
+          for (let col = 0; col < GRID_WIDTH; col++) {
+            const tile = this.grid[row][col];
+            if (tile) {
+              // Keep special tiles as they are
+              if (!tile.getData("specialType")) {
+                const newKey = tileKeys[keyIndex++];
+                tile.setTexture(newKey);
+                tile.setData("tileKey", newKey);
+              }
+            }
+          }
+        }
+        
+        // Restore tiles with animation
+        this.tweens.add({
+          targets: tiles,
+          alpha: 1,
+          scale: 1,
+          duration: 300,
+          onComplete: () => {
+            // Re-enable user input
+            this.canSelect = true;
+            
+            // Verify that the new configuration has potential matches
+            if (!this.hasPotentialMatches()) {
+              console.log("Still no matches after reshuffle! Trying again...");
+              this.reshuffleBoard(); // Try again if still no matches
+            } else {
+              this.showNotification("棋盘已重新洗牌!");
+              
+              // Play a sound effect for the reshuffle
+              this.playSound("special");
+            }
+          }
+        });
+      }
+    });
   }
 }
